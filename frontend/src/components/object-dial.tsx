@@ -48,7 +48,9 @@ export function ObjectDial({ radius, mass, density, floats, onRadius, min, max, 
     // A pea-sized object is a dot at true scale, which is honest but hides
     // what it is made of — so show it enlarged in the corner, and say by how
     // much rather than quietly drawing it the wrong size.
-    const MIN = size * 0.1;
+    // Only worth a magnifier when the object is genuinely too small to read;
+    // an inset at ×2 is just clutter next to a perfectly visible object.
+    const MIN = size * 0.045;
     if (px < MIN) {
       const inset = size * 0.16;
       const cx = size - inset - size * 0.07;
