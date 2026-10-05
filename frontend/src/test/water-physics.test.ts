@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   G,
+  draftOf,
   RHO_WATER,
   impactOf,
   groupSpeedOf,
@@ -59,6 +60,37 @@ describe("impact of an object", () => {
   it("separates the capillary and gravity regimes by object size", () => {
     expect(impactOf({ mass: 5e-5, radius: 0.002, dropHeight: 1 }).regime).toBe("capillary");
     expect(impactOf({ mass: 6.5, radius: 0.11, dropHeight: 1 }).regime).toBe("gravity");
+  });
+
+  it("sits a float at the depth that displaces its own weight", () => {
+    const r = 0.1;
+    const full = (4 / 3) * Math.PI * r ** 3;
+    // Neutrally buoyant: exactly half under.
+    expect(draftOf(r, 1000 * full) / (2 * r)).toBeCloseTo(1, 2);
+    const half = draftOf(r, 500 * full);
+    expect(half).toBeCloseTo(r, 2);
+    // A nearly weightless ball barely dips in; a heavy one is nearly drowned.
+    expect(draftOf(r, 20 * full)).toBeLessThan(r * 0.35);
+    expect(draftOf(r, 950 * full)).toBeGreaterThan(r * 1.5);
+  });
+
+  it("bobs floats slowly enough to animate, using the waterline not the equator", () => {
+    // The restoring force comes from the waterline circle. Taking it as πr²
+    // put a beach ball at 11 Hz and a 4 cm cork at 139 Hz — far too fast to
+    // draw, so they juddered instead of bobbing.
+    const beach = impactOf({ mass: 0.15, radius: 0.16, dropHeight: 1 });
+    const cork = impactOf({ mass: 0.0644, radius: 0.04, dropHeight: 1 });
+    for (const im of [beach, cork]) {
+      const hz = im.bobOmega / (2 * Math.PI);
+      expect(hz).toBeGreaterThan(0.3);
+      expect(hz).toBeLessThan(8);
+    }
+    // Denser means deeper. (It does not mean faster: the extra waterline
+    // stiffness is outweighed by the extra mass, so a deep float bobs slower.)
+    const high = impactOf({ mass: 0.02, radius: 0.05, dropHeight: 1 });
+    const low = impactOf({ mass: 0.45, radius: 0.05, dropHeight: 1 });
+    expect(low.submerged).toBeGreaterThan(high.submerged);
+    expect(low.bobOmega).toBeLessThan(high.bobOmega);
   });
 
   it("floats anything less dense than water and bobs it slower when heavier", () => {

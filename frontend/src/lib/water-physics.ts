@@ -76,6 +76,10 @@ export type Impact = {
   regime: "capillary" | "gravity";
   /** ρ_object < ρ_water */
   floats: boolean;
+  /** m, how deep a floating object sits — the submerged cap's depth */
+  draft: number;
+  /** 0–1 of its diameter that is under water */
+  submerged: number;
   /** rad/s buoyancy bobbing frequency of a floating object */
   bobOmega: number;
   /** how many crown droplets the splash throws off */
@@ -102,6 +106,30 @@ export function groupSpeedOf(k: number, w: WaterParams = WATER): number {
   const omega = omegaOf(k, w);
   if (omega === 0) return 0;
   return (G + (3 * w.sigma * k * k) / RHO_WATER) / (2 * omega);
+}
+
+/** Volume of a spherical cap of depth d cut from a sphere of radius r. */
+function capVolume(r: number, d: number): number {
+  return (Math.PI / 3) * d * d * (3 * r - d);
+}
+
+/**
+ * How deep a floating sphere sits: the cap depth whose volume displaces the
+ * object's own weight. Monotone in d, so a bisection is exact enough and
+ * never misbehaves. A sinking object is drowned, d = 2r.
+ */
+export function draftOf(radius: number, mass: number): number {
+  const full = (4 / 3) * Math.PI * radius ** 3;
+  const want = mass / RHO_WATER;
+  if (want >= full) return 2 * radius;
+  let lo = 0;
+  let hi = 2 * radius;
+  for (let i = 0; i < 48; i++) {
+    const mid = (lo + hi) / 2;
+    if (capVolume(radius, mid) < want) lo = mid;
+    else hi = mid;
+  }
+  return (lo + hi) / 2;
 }
 
 export function impactOf(obj: ObjectParams, w: WaterParams = WATER): Impact {
@@ -138,8 +166,18 @@ export function impactOf(obj: ObjectParams, w: WaterParams = WATER): Impact {
   const amplitude = Math.sqrt((2 * waveEnergy) / (RHO_WATER * G * Math.max(ringArea, 1e-9)));
 
   const floats = density < RHO_WATER;
-  // Buoyancy spring on a half-submerged sphere: k_s = ρ g π r².
-  const bobOmega = Math.sqrt((RHO_WATER * G * Math.PI * radius * radius) / mass);
+  const draft = draftOf(radius, mass);
+  // The restoring force comes from the waterline circle, not the sphere's
+  // widest point: a beach ball barely dips in, so its waterplane is small and
+  // it bobs slowly. Using πr² here instead put a beach ball at 11 Hz and a
+  // cork at 139 Hz — faster than the screen can draw, so they juddered.
+  const waterplane = Math.PI * Math.max(2 * radius * draft - draft * draft, 1e-9);
+  // Bobbing drags water along with it; for a sphere that added mass is about
+  // half the water it displaces.
+  const addedMass = 0.5 * RHO_WATER * ((4 / 3) * Math.PI * radius ** 3) * (draft / (2 * radius));
+  const bobOmega = floats
+    ? Math.sqrt((RHO_WATER * G * waterplane) / (mass + addedMass))
+    : Math.sqrt((RHO_WATER * G * Math.PI * radius * radius) / mass);
 
   return {
     v,
@@ -162,6 +200,8 @@ export function impactOf(obj: ObjectParams, w: WaterParams = WATER): Impact {
     decay: 2 * w.nu * k * k,
     regime: wavelength < minimumWavelength(w) ? "capillary" : "gravity",
     floats,
+    draft,
+    submerged: draft / (2 * radius),
     bobOmega,
     // A crown only breaks into droplets once inertia beats surface tension.
     droplets:

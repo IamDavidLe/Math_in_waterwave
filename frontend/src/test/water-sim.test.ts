@@ -131,8 +131,14 @@ describe("WaterSim", () => {
   it("records where waves were born and forgets them again", () => {
     const sim = new WaterSim({ width: 140, height: 110 });
     splashed(sim, 0.5, 0.5, brick);
-    for (let i = 0; i < 40; i++) sim.step(2);
-    expect(sim.marks.length).toBeGreaterThan(0);
+    // Sample while they are still alive: a mark only lasts MARK_LIFE, and the
+    // splash stops breaking long before that, so looking too late sees none.
+    let seen = 0;
+    for (let i = 0; i < 10; i++) {
+      sim.step(2);
+      seen = Math.max(seen, sim.marks.length);
+    }
+    expect(seen).toBeGreaterThan(0);
     for (const m of sim.marks) {
       expect(m.kind).toBe("break");
       expect(m.strength).toBeGreaterThan(0);

@@ -46,6 +46,14 @@ const CLAMP = 1.03;
 const MAX_BREAKS = 64;
 /** Most collision marks kept for the renderer at once. */
 const MAX_MARKS = 120;
+/**
+ * Fastest bob the solver drives a float at. Very light floats sit so shallow
+ * that buoyancy genuinely rings at tens of hertz — real, but faster than this
+ * timestep resolves or a screen can draw, so it arrives as judder instead of
+ * bobbing. The reported physics in `Impact` keeps the true figure.
+ */
+export const MAX_BOB_OMEGA = 2 * Math.PI * 6;
+
 /** Seconds a mark stays on screen. */
 export const MARK_LIFE = 0.7;
 
@@ -495,7 +503,8 @@ export class WaterSim {
         // Buoyancy spring: the hull follows a damped bob and drags the surface
         // with it, radiating a slow train of waves at ω_bob.
         const decay = Math.exp(-b.t * 0.9);
-        const z = this.amplitudeOf(b.impact) * 0.55 * decay * Math.cos(b.impact.bobOmega * b.t);
+        const omega = Math.min(b.impact.bobOmega, MAX_BOB_OMEGA);
+        const z = this.amplitudeOf(b.impact) * 0.55 * decay * Math.cos(omega * b.t);
         b.z = z;
         this.drive(b.x, b.y, b.radiusCells, z, 0.3);
         if (b.t > 14) this.bodies.splice(n, 1);

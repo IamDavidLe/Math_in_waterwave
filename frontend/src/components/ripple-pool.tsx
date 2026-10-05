@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 
 import {
+  G,
   type Impact,
   type ObjectParams,
   type WaterParams,
@@ -446,16 +447,47 @@ export function RipplePool({
         g.fill();
       }
 
-      const mpu = lastMetresPerUnit;
+      /* Heights above and below the water are NOT drawn with sideGain. That
+         gain exaggerates millimetre ripples and can run into the thousands, so
+         using it for an object threw a bobbing float off the top of the view
+         and left it juddering. Air and depth get their own honest scales. */
+      const airPx = waterline - 8 * dpr;
+      const deepPx = CH - waterline;
+      const sprayScale = Math.min(airPx / 0.2, 2600 * dpr);
+
       for (const b of sim.bodies) {
         const near = Math.abs(b.y - row);
-        if (near > 10) continue;
+        if (near > 12) continue;
         const r = Math.max(3 * dpr, (b.impact.craterRadius / sim.metersPerCell) * 0.6 * sx);
         const cx = b.x * sx;
-        const fade = 1 - near / 10;
-        // z is metres for a falling or sinking body, solver units for a floater
-        const dy = b.state === "floating" ? -b.z * sideGain : (-b.z / mpu) * sideGain;
-        drawObject(g, lookById(b.look), cx, waterline + dy, r, {
+        // Keep a floor on the fade: something just off the cut should still be
+        // visible rather than winking out exactly at the edge of the band.
+        const fade = Math.max(0.15, 1 - near / 12);
+        let cy: number;
+        if (b.state === "falling") {
+          // Scaled so the whole fall is visible, however high it started.
+          const fell = Math.max(0.08, b.impact.v ** 2 / (2 * G));
+          cy = waterline - b.z * (airPx / fell);
+        } else if (b.state === "floating") {
+          /* A float rides the surface it sits on, dipped in by the fraction
+             Archimedes says — half-submerged sits centred on the line. It
+             responds to the *mean* surface under its hull, not to one point:
+             reading a single cell let a sharp ripple passing beneath flick the
+             object up and down between frames. */
+          const half = Math.max(1, Math.round(b.impact.craterRadius / sim.metersPerCell));
+          let sum = 0;
+          let n = 0;
+          for (let x = Math.round(b.x) - half; x <= Math.round(b.x) + half; x++) {
+            if (x < 0 || x >= W) continue;
+            sum += eta[base + x]!;
+            n++;
+          }
+          const mean = n ? sum / n : 0;
+          cy = waterline - mean * sideGain - r * (1 - 2 * b.impact.submerged);
+        } else {
+          cy = waterline + Math.min(1, -b.z / 0.4) * deepPx;
+        }
+        drawObject(g, lookById(b.look), cx, cy, r, {
           alpha: fade * (b.state === "sinking" ? 0.7 : 1),
           spin: b.id * 0.7,
         });
@@ -467,7 +499,7 @@ export function RipplePool({
         g.beginPath();
         g.arc(
           d.x * sx,
-          waterline - (d.z / mpu) * sideGain,
+          waterline - d.z * sprayScale,
           Math.max(1.2 * dpr, d.r * sx),
           0,
           Math.PI * 2,
@@ -476,7 +508,7 @@ export function RipplePool({
       }
 
       // honest labels
-      const exaggeration = sideGain / mpu / (CW / sim.cfg.metersAcross);
+      const exaggeration = sideGain / lastMetresPerUnit / (CW / sim.cfg.metersAcross);
       g.fillStyle = "rgba(190,225,240,0.65)";
       g.font = `${11 * dpr}px JetBrains Mono, monospace`;
       g.fillText(
@@ -661,6 +693,9 @@ export function RipplePool({
       return;
     }
     armed.current = null;
+    // Take the cut to whatever was just dropped, so the side view shows the
+    // fall and the splash rather than flat water beside them.
+    if (view !== "top") slice.current = ny;
     drop(sim, nx, ny);
   };
 
