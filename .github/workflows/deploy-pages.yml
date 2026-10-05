@@ -48,7 +48,11 @@ jobs:
           # Unknown paths fall back to the app, which renders its own 404.
           cp .output/public/index.html .output/public/404.html
 
+      # enablement lets the first run turn Pages on itself, so the workflow
+      # does not depend on someone having clicked through repo settings.
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
 
       - uses: actions/upload-pages-artifact@v3
         with:
