@@ -100,6 +100,8 @@ export type Body = {
   /** seconds since impact */
   t: number;
   impact: Impact;
+  /** which appearance to draw this with; the solver never reads it */
+  look: string;
 };
 
 export type Droplet = {
@@ -217,7 +219,7 @@ export class WaterSim {
   }
 
   /** Drop an object from `impact.v`'s height at the given relative position. */
-  drop(nx: number, ny: number, impact: Impact): Body {
+  drop(nx: number, ny: number, impact: Impact, look = ""): Body {
     const body: Body = {
       id: this.nextId++,
       x: nx * this.w,
@@ -228,6 +230,7 @@ export class WaterSim {
       state: "falling",
       t: 0,
       impact,
+      look,
     };
     this.bodies.push(body);
     return body;

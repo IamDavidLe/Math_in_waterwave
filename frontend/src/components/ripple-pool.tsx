@@ -7,6 +7,7 @@ import {
   analyticProfile,
   impactOf,
 } from "@/lib/water-physics";
+import { drawObject, lookById } from "@/lib/object-looks";
 import { MARK_LIFE, type SimConfig, WaterSim, metresPerUnit } from "@/lib/water-sim";
 
 export type SolverControls = Pick<
@@ -30,6 +31,8 @@ export type PoolView = "top" | "side" | "both";
 
 type Props = {
   view: PoolView;
+  /** id of the appearance dropped objects are drawn with */
+  look: string;
   object: ObjectParams;
   water: WaterParams;
   solver: SolverControls;
@@ -88,7 +91,16 @@ function buildFloor(w: number, h: number) {
   return floor;
 }
 
-export function RipplePool({ view, object, water, solver, paused, onImpact, onStats }: Props) {
+export function RipplePool({
+  view,
+  look,
+  object,
+  water,
+  solver,
+  paused,
+  onImpact,
+  onStats,
+}: Props) {
   const waterRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
   const sideRef = useRef<HTMLCanvasElement>(null);
@@ -96,8 +108,8 @@ export function RipplePool({ view, object, water, solver, paused, onImpact, onSt
   const simRef = useRef<WaterSim | null>(null);
 
   // Live props, read inside the animation loop without restarting it.
-  const live = useRef({ view, object, water, solver, paused, onImpact, onStats });
-  live.current = { view, object, water, solver, paused, onImpact, onStats };
+  const live = useRef({ view, look, object, water, solver, paused, onImpact, onStats });
+  live.current = { view, look, object, water, solver, paused, onImpact, onStats };
   /** Row of the grid the side view cuts through, 0–1 down the tank. */
   const slice = useRef(0.5);
 
@@ -231,6 +243,7 @@ export function RipplePool({ view, object, water, solver, paused, onImpact, onSt
         const r = Math.max(2, (b.impact.craterRadius / sim.metersPerCell) * 0.6 * sx);
         const cx = b.x * sx;
         const cy = b.y * sy;
+        const look = lookById(b.look);
         if (b.state === "falling") {
           // Shadow on the water tightens as the object drops.
           const near = 1 - Math.min(1, b.z / Math.max(live.current.object.dropHeight, 0.01));
@@ -239,39 +252,34 @@ export function RipplePool({ view, object, water, solver, paused, onImpact, onSt
           octx.ellipse(cx, cy, r * (2.4 - near * 1.2), r * (1.6 - near * 0.8), 0, 0, Math.PI * 2);
           octx.fill();
           const lift = b.z * 95 * sy;
-          const scale = 1 + b.z * 0.5;
-          octx.fillStyle = "rgba(226,238,245,0.92)";
-          octx.beginPath();
-          octx.arc(cx, cy - lift, r * scale, 0, Math.PI * 2);
-          octx.fill();
+          drawObject(octx, look, cx, cy - lift, r * (1 + b.z * 0.5), { spin: b.id * 0.7 });
           continue;
         }
         if (b.state === "floating") {
-          const bob = -b.z * 10 * sy;
-          const grad = octx.createLinearGradient(cx, cy - r + bob, cx, cy + r + bob);
-          grad.addColorStop(0, "rgba(236,246,252,0.95)");
-          grad.addColorStop(1, "rgba(120,170,195,0.85)");
-          octx.fillStyle = grad;
-          octx.beginPath();
-          octx.arc(cx, cy + bob, r, 0, Math.PI * 2);
-          octx.fill();
+          drawObject(octx, look, cx, cy - b.z * 10 * sy, r, { spin: b.id * 0.7 });
           continue;
         }
+        // Sinking: dim and shrink with depth as the water closes over it.
         const depth = Math.min(1, -b.z / 0.35);
-        octx.fillStyle = `rgba(6,30,42,${0.75 * (1 - depth)})`;
-        octx.beginPath();
-        octx.arc(cx, cy, r * (1 - depth * 0.55), 0, Math.PI * 2);
-        octx.fill();
+        drawObject(octx, look, cx, cy, r * (1 - depth * 0.55), {
+          alpha: 0.85 * (1 - depth),
+          spin: b.id * 0.7,
+        });
       }
 
-      // Where crests broke — each one is a wave that was just born.
-      for (const m of sim.marks) {
+      // Where crests broke — each one is a wave that was just born. A single
+      // splash breaks all round its rim at once, so only the strongest few are
+      // drawn: enough to point at a collision, not enough to fur the screen.
+      const shown = sim.marks
+        .filter((m) => sim.time - m.t < MARK_LIFE)
+        .sort((a, b) => b.strength - a.strength)
+        .slice(0, 8);
+      for (const m of shown) {
         const age = (sim.time - m.t) / MARK_LIFE;
-        if (age > 1) continue;
-        octx.strokeStyle = `rgba(190,240,255,${(1 - age) * 0.5})`;
-        octx.lineWidth = Math.max(1, 1.5 * dpr * (1 - age));
+        octx.strokeStyle = `rgba(190,240,255,${(1 - age) * 0.28})`;
+        octx.lineWidth = Math.max(0.8, 1.2 * dpr * (1 - age));
         octx.beginPath();
-        octx.arc(m.x * sx, m.y * sy, (2 + age * 16) * sx, 0, Math.PI * 2);
+        octx.arc(m.x * sx, m.y * sy, (2 + age * 22) * sx, 0, Math.PI * 2);
         octx.stroke();
       }
 
@@ -447,12 +455,10 @@ export function RipplePool({ view, object, water, solver, paused, onImpact, onSt
         const fade = 1 - near / 10;
         // z is metres for a falling or sinking body, solver units for a floater
         const dy = b.state === "floating" ? -b.z * sideGain : (-b.z / mpu) * sideGain;
-        g.globalAlpha = fade;
-        g.fillStyle = b.state === "sinking" ? "rgba(10,34,46,0.95)" : "rgba(232,244,250,0.95)";
-        g.beginPath();
-        g.arc(cx, waterline + dy, r, 0, Math.PI * 2);
-        g.fill();
-        g.globalAlpha = 1;
+        drawObject(g, lookById(b.look), cx, waterline + dy, r, {
+          alpha: fade * (b.state === "sinking" ? 0.7 : 1),
+          spin: b.id * 0.7,
+        });
       }
       for (const d of sim.droplets) {
         const near = Math.abs(d.y - row);
@@ -632,34 +638,61 @@ export function RipplePool({ view, object, water, solver, paused, onImpact, onSt
     };
   }, []);
 
-  /** Grabbing the dashed line moves the slice; anywhere else drops or stirs. */
-  const draggingSlice = useRef(false);
+  /**
+   * The slice line parks itself on the last splash, which is exactly where you
+   * want to drop the next object — so pressing on the line must not steal the
+   * click. A press near it only *arms* a drag: move and you take the line with
+   * you, release without moving and it drops as usual.
+   */
+  const armed = useRef<{ x: number; y: number; dragging: boolean } | null>(null);
 
-  const pointer = (e: React.PointerEvent<HTMLDivElement>, held: boolean) => {
+  const drop = (sim: WaterSim, nx: number, ny: number) =>
+    sim.drop(nx, ny, impactOf(live.current.object, live.current.water), live.current.look);
+
+  const down = (e: React.PointerEvent<HTMLDivElement>) => {
     const sim = simRef.current;
     if (!sim) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const nx = (e.clientX - rect.left) / rect.width;
     const ny = (e.clientY - rect.top) / rect.height;
     if (nx < 0 || ny < 0 || nx > 1 || ny > 1) return;
+    if (view !== "top" && Math.abs(ny - slice.current) * rect.height < 14) {
+      armed.current = { x: e.clientX, y: e.clientY, dragging: false };
+      return;
+    }
+    armed.current = null;
+    drop(sim, nx, ny);
+  };
 
-    if (held && draggingSlice.current) {
+  const move = (e: React.PointerEvent<HTMLDivElement>) => {
+    const sim = simRef.current;
+    if (!sim || e.buttons !== 1) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const nx = (e.clientX - rect.left) / rect.width;
+    const ny = (e.clientY - rect.top) / rect.height;
+    if (nx < 0 || ny < 0 || nx > 1 || ny > 1) return;
+
+    const a = armed.current;
+    if (a) {
+      if (!a.dragging && Math.hypot(e.clientX - a.x, e.clientY - a.y) < 4) return;
+      a.dragging = true;
       slice.current = ny;
       return;
     }
-    if (!held) {
-      const onLine = view !== "top" && Math.abs(ny - slice.current) * rect.height < 12;
-      draggingSlice.current = onLine;
-      if (onLine) {
-        slice.current = ny;
-        return;
-      }
-    }
-    if (held) {
-      sim.stir(nx, ny, 0.07, 2.5);
-      return;
-    }
-    sim.drop(nx, ny, impactOf(live.current.object, live.current.water));
+    sim.stir(nx, ny, 0.07, 2.5);
+  };
+
+  const up = (e: React.PointerEvent<HTMLDivElement>) => {
+    const sim = simRef.current;
+    const a = armed.current;
+    armed.current = null;
+    if (!sim || !a || a.dragging) return;
+    // Pressed on the line and let go without moving — that was a drop.
+    const rect = e.currentTarget.getBoundingClientRect();
+    const nx = (e.clientX - rect.left) / rect.width;
+    const ny = (e.clientY - rect.top) / rect.height;
+    if (nx < 0 || ny < 0 || nx > 1 || ny > 1) return;
+    drop(sim, nx, ny);
   };
 
   /** Clicking the side view drops onto the line it is cutting. */
@@ -669,7 +702,12 @@ export function RipplePool({ view, object, water, solver, paused, onImpact, onSt
     const rect = e.currentTarget.getBoundingClientRect();
     const nx = (e.clientX - rect.left) / rect.width;
     if (nx < 0 || nx > 1) return;
-    sim.drop(nx, slice.current, impactOf(live.current.object, live.current.water));
+    sim.drop(
+      nx,
+      slice.current,
+      impactOf(live.current.object, live.current.water),
+      live.current.look,
+    );
   };
 
   return (
@@ -679,10 +717,10 @@ export function RipplePool({ view, object, water, solver, paused, onImpact, onSt
       <div className={view === "side" ? "hidden" : "contents"}>
         <div
           className="glass relative overflow-hidden p-0"
-          onPointerDown={(e) => pointer(e, false)}
-          onPointerUp={() => (draggingSlice.current = false)}
-          onPointerLeave={() => (draggingSlice.current = false)}
-          onPointerMove={(e) => (e.buttons === 1 ? pointer(e, true) : undefined)}
+          onPointerDown={down}
+          onPointerUp={up}
+          onPointerLeave={() => (armed.current = null)}
+          onPointerMove={move}
         >
           <canvas
             ref={waterRef}

@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 
 import { ObjectDial } from "@/components/object-dial";
+import { DEFAULT_LOOK, MATERIAL_LOOKS, OBJECT_LOOKS, lookByName } from "@/lib/object-looks";
 import { PhysicsGuide } from "@/components/physics-guide";
 import {
   RipplePool,
@@ -224,11 +225,14 @@ function Index() {
   const [breaking, setBreaking] = useState(true);
   const [paused, setPaused] = useState(false);
   const [view, setView] = useState<PoolView>("both");
+  /** Appearance follows the last thing picked — an object, or a material. */
+  const [lookName, setLookName] = useState<string | null>("Apple");
   const [stats, setStats] = useState<PoolStats | null>(null);
 
   const water: WaterParams = useMemo(() => ({ sigma, nu: NU_WATER * nuMult }), [sigma, nuMult]);
   const object = useMemo(() => ({ mass, radius, dropHeight }), [mass, radius, dropHeight]);
   const im = useMemo(() => impactOf(object, water), [object, water]);
+  const look = useMemo(() => lookByName(lookName) ?? DEFAULT_LOOK, [lookName]);
 
   const solver: SolverControls = useMemo(
     () => ({
@@ -251,6 +255,7 @@ function Index() {
 
   const pickMaterial = (name: string, rho: number) => {
     setMaterial(name);
+    setLookName(name);
     setMass(rho * SPHERE(radius));
   };
 
@@ -263,10 +268,17 @@ function Index() {
             <p className="flex items-center gap-3 font-mono text-[11px] font-medium uppercase tracking-[0.28em] text-primary">
               <span className="h-px w-8 bg-primary/75" />
               Ripple Lab
+              <span className="lab-hero__byline">Phat Le</span>
             </p>
-            <span className="lab-hero__status">
-              <span className="lab-hero__status-dot" />
-              Interactive wave model
+            <span className="model-status">
+              <span className="model-status__signal" aria-hidden="true">
+                <i />
+              </span>
+              <span className="model-status__copy">
+                <strong>Simulation active</strong>
+                <small>Nonlinear wave field</small>
+              </span>
+              <span className="model-status__version">v1.0</span>
             </span>
           </div>
 
@@ -330,6 +342,7 @@ function Index() {
           </div>
           <RipplePool
             view={view}
+            look={look.id}
             object={object}
             water={water}
             solver={solver}
@@ -363,6 +376,7 @@ function Index() {
               onRadius={applyRadius}
               min={0.001}
               max={0.22}
+              look={look}
             />
             <Range
               label="Radius r"
@@ -402,6 +416,7 @@ function Index() {
                 key: m.name,
                 label: m.name,
                 active: material === m.name,
+                swatch: MATERIAL_LOOKS[m.name]?.base,
               }))}
               onPick={(key) => {
                 const m = MATERIALS.find((x) => x.name === key)!;
@@ -414,10 +429,12 @@ function Index() {
                 key: o.name,
                 label: o.name,
                 active: Math.abs(o.mass - mass) < 1e-9 && Math.abs(o.radius - radius) < 1e-9,
+                swatch: OBJECT_LOOKS[o.name]?.base,
               }))}
               onPick={(key) => {
                 const o = OBJECTS.find((x) => x.name === key)!;
                 setMaterial(null);
+                setLookName(key);
                 setRadius(o.radius);
                 setMass(o.mass);
               }}
@@ -489,7 +506,7 @@ function Chips({
   onPick,
 }: {
   title: string;
-  items: { key: string; label: string; active: boolean }[];
+  items: { key: string; label: string; active: boolean; swatch?: string | undefined }[];
   onPick: (key: string) => void;
 }) {
   return (
@@ -502,10 +519,17 @@ function Chips({
           <button
             key={i.key}
             onClick={() => onPick(i.key)}
-            className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
+            className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors ${
               i.active ? "bg-primary text-primary-foreground" : "hover:bg-secondary"
             }`}
           >
+            {i.swatch && (
+              <span
+                aria-hidden="true"
+                className="size-2.5 shrink-0 rounded-full border border-black/30"
+                style={{ background: i.swatch }}
+              />
+            )}
             {i.label}
           </button>
         ))}

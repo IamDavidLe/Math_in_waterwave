@@ -1,4 +1,6 @@
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
+
+import { type Look, drawObject } from "@/lib/object-looks";
 
 /** cm of tank shown across the pad, so the object is drawn to scale */
 const PAD_CM = 50;
@@ -14,6 +16,8 @@ type Props = {
   onRadius: (r: number) => void;
   min: number;
   max: number;
+  /** how the object is drawn — set by what it is, or what it is made of */
+  look: Look;
 };
 
 /**
@@ -21,8 +25,49 @@ type Props = {
  * centre *is* the radius, drawn against a centimetre rule so the size stays
  * physical rather than abstract.
  */
-export function ObjectDial({ radius, mass, density, floats, onRadius, min, max }: Props) {
+export function ObjectDial({ radius, mass, density, floats, onRadius, min, max, look }: Props) {
   const padRef = useRef<HTMLDivElement>(null);
+  const previewRef = useRef<HTMLCanvasElement>(null);
+
+  // The pad shows the object at true scale against the rule, drawn with the
+  // same renderer the water uses, so the thing you size is the thing you drop.
+  useEffect(() => {
+    const cv = previewRef.current;
+    const pad = padRef.current;
+    if (!cv || !pad) return;
+    const box = pad.getBoundingClientRect();
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const size = Math.max(1, Math.round(box.width * dpr));
+    cv.width = size;
+    cv.height = size;
+    const g = cv.getContext("2d")!;
+    g.clearRect(0, 0, size, size);
+    const px = ((radius * 100) / (PAD_CM / 2)) * (size / 2) * 0.9;
+    drawObject(g, look, size / 2, size / 2, Math.max(2, px));
+
+    // A pea-sized object is a dot at true scale, which is honest but hides
+    // what it is made of — so show it enlarged in the corner, and say by how
+    // much rather than quietly drawing it the wrong size.
+    const MIN = size * 0.1;
+    if (px < MIN) {
+      const inset = size * 0.16;
+      const cx = size - inset - size * 0.07;
+      const cy = inset + size * 0.07;
+      g.save();
+      g.strokeStyle = "rgba(190,225,240,0.22)";
+      g.lineWidth = Math.max(1, size * 0.004);
+      g.beginPath();
+      g.arc(cx, cy, inset * 1.35, 0, Math.PI * 2);
+      g.stroke();
+      g.restore();
+      drawObject(g, look, cx, cy, inset);
+      g.fillStyle = "rgba(190,225,240,0.6)";
+      g.font = `${size * 0.045}px JetBrains Mono, monospace`;
+      g.textAlign = "center";
+      g.fillText(`×${Math.round(inset / Math.max(px, 0.4))}`, cx, cy + inset * 1.95);
+      g.textAlign = "left";
+    }
+  }, [radius, look]);
 
   const resize = (e: React.PointerEvent) => {
     const pad = padRef.current;
@@ -34,7 +79,6 @@ export function ObjectDial({ radius, mass, density, floats, onRadius, min, max }
     onRadius(Math.min(max, Math.max(min, cm / 100)));
   };
 
-  const frac = Math.min(1, (radius * 100) / (PAD_CM / 2));
   const weight =
     mass >= 1 ? `${mass.toFixed(2)} kg` : `${(mass * 1000).toFixed(mass < 0.01 ? 2 : 0)} g`;
 
@@ -78,20 +122,7 @@ export function ObjectDial({ radius, mass, density, floats, onRadius, min, max }
           {PAD_CM} cm
         </span>
 
-        <div className="absolute inset-0 grid place-items-center">
-          <div
-            className="rounded-full border transition-[width,height] duration-75"
-            style={{
-              width: `${frac * 90}%`,
-              height: `${frac * 90}%`,
-              background: floats
-                ? "radial-gradient(circle at 35% 30%, oklch(0.92 0.06 200), oklch(0.68 0.08 210))"
-                : "radial-gradient(circle at 35% 30%, oklch(0.72 0.05 240), oklch(0.32 0.04 250))",
-              borderColor: "oklch(0.9 0.04 200 / 0.4)",
-              boxShadow: "0 8px 24px oklch(0.1 0.04 240 / 0.5)",
-            }}
-          />
-        </div>
+        <canvas ref={previewRef} className="absolute inset-0 h-full w-full" aria-hidden="true" />
         <div className="pointer-events-none absolute left-2 top-2 font-mono text-[10px] leading-4 text-muted-foreground">
           <div>r = {(radius * 100).toFixed(radius < 0.01 ? 2 : 1)} cm</div>
           <div>m = {weight}</div>
