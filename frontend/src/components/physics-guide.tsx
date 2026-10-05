@@ -1,9 +1,11 @@
 import type { ReactNode } from "react";
 
 import {
+  CRATER_FIT,
   G,
   NU_WATER,
   RHO_WATER,
+  SIGMA_WATER,
   WAVE_EFFICIENCY,
   type Impact,
   type ObjectParams,
@@ -13,9 +15,9 @@ import {
   minimumWavelength,
 } from "@/lib/water-physics";
 
-/* ── small typesetting helpers ────────────────────────────────────────────── */
-/* Variables are italic, operators and units upright, indices are real
-   subscripts — so c_g, ρ_o and η_tt read as mathematics instead of code. */
+/* ── typesetting ──────────────────────────────────────────────────────────── */
+/* Variables italic, operators and units upright, indices as real subscripts —
+   so c_g, ρ_o and η_tt read as mathematics rather than as code. */
 
 const V = ({ children }: { children: ReactNode }) => (
   <i className="font-display italic">{children}</i>
@@ -27,35 +29,63 @@ const Sup = ({ children }: { children: ReactNode }) => (
   <sup className="text-[0.62em]">{children}</sup>
 );
 
-function Formula({ children }: { children: ReactNode }) {
-  return (
-    <p className="font-display text-2xl leading-snug tracking-tight text-foreground md:text-[1.75rem]">
-      {children}
-    </p>
-  );
-}
+const fmt = (x: number, d = 2) =>
+  !Number.isFinite(x)
+    ? "∞"
+    : Math.abs(x) >= 10000 || (Math.abs(x) < 0.001 && x !== 0)
+      ? x.toExponential(2)
+      : x.toFixed(d);
 
-function Result({ children, hint }: { children: ReactNode; hint?: string }) {
+/**
+ * A worked calculation, lined up on the equals signs:
+ *
+ *     v  =  √(2gh)
+ *        =  √(2 × 9.81 × 1.00)
+ *        =  4.43 m/s
+ *
+ * The first row names the quantity; later rows continue it. Substituting the
+ * real numbers is the point — it turns a formula into something you can check.
+ */
+function Work({ name, rows }: { name: ReactNode; rows: ReactNode[] }) {
   return (
-    <div className="mt-3">
-      <p className="font-mono text-lg text-primary">{children}</p>
-      {hint && <p className="mt-1 text-xs text-muted-foreground">{hint}</p>}
+    <div className="mt-4 overflow-x-auto">
+      <div className="grid w-fit grid-cols-[auto_auto_1fr] items-baseline gap-x-2.5 gap-y-1.5">
+        {rows.map((r, i) => (
+          <div key={i} className="contents">
+            <span className="justify-self-end font-display text-lg italic">
+              {i === 0 ? name : ""}
+            </span>
+            <span className="text-muted-foreground">=</span>
+            <span
+              className={
+                i === rows.length - 1
+                  ? "font-mono text-base text-primary"
+                  : "font-mono text-[13px] text-foreground/85"
+              }
+            >
+              {r}
+            </span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
 
-/** One step of the story: prose on the left, the mathematics on the right. */
+function Note({ children }: { children: ReactNode }) {
+  return <p className="mt-3 text-xs leading-relaxed text-muted-foreground">{children}</p>;
+}
+
+/** One step: the idea in a sentence or two, then the arithmetic beside it. */
 function Stage({
   n,
   title,
-  lead,
-  children,
+  idea,
   math,
 }: {
   n: number;
   title: string;
-  lead: ReactNode;
-  children?: ReactNode;
+  idea: ReactNode;
   math: ReactNode;
 }) {
   return (
@@ -65,18 +95,17 @@ function Stage({
           Step {n}
         </p>
         <h3 className="mt-2 font-display text-2xl font-light">{title}</h3>
-        <div className="mt-3 space-y-3 text-sm leading-relaxed text-muted-foreground">{lead}</div>
-        {children}
+        <div className="mt-3 space-y-3 text-sm leading-relaxed text-muted-foreground">{idea}</div>
       </div>
-      <div className="flex flex-col justify-center rounded-xl bg-secondary/35 p-5">{math}</div>
+      <div className="rounded-xl bg-secondary/35 p-5">{math}</div>
     </section>
   );
 }
 
-/** "Turn the dials" — what actually changes when the object changes. */
+/** What actually changes when the object does. */
 function Levers({ items }: { items: { k: string; v: string }[] }) {
   return (
-    <dl className="mt-4 space-y-1.5">
+    <dl className="mt-4 space-y-1.5 border-t border-border pt-3">
       {items.map((i) => (
         <div key={i.k} className="flex gap-2 text-xs">
           <dt className="shrink-0 font-mono text-accent">{i.k}</dt>
@@ -87,14 +116,6 @@ function Levers({ items }: { items: { k: string; v: string }[] }) {
   );
 }
 
-const fmt = (x: number, d = 2) =>
-  !Number.isFinite(x)
-    ? "∞"
-    : Math.abs(x) >= 10000 || (Math.abs(x) < 0.001 && x !== 0)
-      ? x.toExponential(2)
-      : x.toFixed(d);
-
-/** "11.6 cm → 20.1 cm" for a quantity under a changed object. */
 const shift = (now: number, then: number, unit: string, d = 2) =>
   `${fmt(now, d)} → ${fmt(then, d)} ${unit}`;
 
@@ -107,14 +128,19 @@ export function PhysicsGuide({
   water: WaterParams;
   im: Impact;
 }) {
-  // Real comparisons, not hand-waving: re-run the same physics on an object
-  // twice as wide and one twice as heavy.
+  // Real comparisons: the same physics re-run on a wider and a heavier object.
   const wider = impactOf({ ...object, radius: object.radius * 2 }, water);
   const heavier = impactOf({ ...object, mass: object.mass * 2 }, water);
+
+  const r = object.radius;
+  const m = object.mass;
+  const h = object.dropHeight;
+  const sigma = water.sigma;
+  const energyLimit = CRATER_FIT * Math.pow(im.energy / (RHO_WATER * G), 0.25);
   const halfLife = im.decay > 0 ? Math.LN2 / im.decay : Infinity;
   const lambdaMin = minimumWavelength(water);
-  const cMin = minimumSpeed(water);
-  const sizeLimited = im.craterRadius <= object.radius * 1.02;
+  const ringArea = 2 * Math.PI * im.craterRadius * im.wavelength;
+  const sizeLimited = im.craterRadius <= r * 1.02;
 
   return (
     <div className="mt-12 space-y-4">
@@ -124,46 +150,113 @@ export function PhysicsGuide({
           From three numbers to a ripple
         </h2>
         <p className="mt-3 text-muted-foreground">
-          You set three things: how <em>big</em> the object is, how <em>heavy</em> it is, and how
-          far it <em>falls</em>. Everything the water does follows from those, one step at a time.
-          Each step below shows the reasoning, the formula, and the number it gives for the object
-          you have right now.
+          You set three things. Everything the water does follows from them, one step at a time.
+          Each step gives the idea in a sentence, the formula, and then the same formula with your
+          numbers put in — so every figure on this page can be checked by hand.
         </p>
       </header>
+
+      {/* What goes in */}
+      <section className="glass p-6 md:p-7">
+        <h3 className="font-display text-xl font-light">What goes in</h3>
+        <dl className="mt-4 grid gap-x-8 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
+          {[
+            { s: <V>m</V>, k: "mass", v: `${fmt(m * 1000, m < 0.01 ? 2 : 0)} g`, from: "you" },
+            { s: <V>r</V>, k: "radius", v: `${fmt(r * 100)} cm`, from: "you" },
+            { s: <V>h</V>, k: "drop height", v: `${fmt(h)} m`, from: "you" },
+            { s: <V>g</V>, k: "gravity", v: `${G} m/s²`, from: "Earth" },
+            {
+              s: <V>ρ</V>,
+              k: "density of water",
+              v: `${RHO_WATER} kg/m³`,
+              from: "water",
+            },
+            {
+              s: <V>σ</V>,
+              k: "surface tension",
+              v: `${fmt(sigma, 4)} N/m`,
+              from: sigma === SIGMA_WATER ? "clean water" : "your slider",
+            },
+            {
+              s: <V>ν</V>,
+              k: "viscosity",
+              v: `${fmt(water.nu * 1e6, 2)} mm²/s`,
+              from: water.nu === NU_WATER ? "clean water" : "your slider",
+            },
+            {
+              s: <V>ε</V>,
+              k: "fraction that becomes waves",
+              v: `${WAVE_EFFICIENCY}`,
+              from: "measured, roughly",
+            },
+          ].map((x) => (
+            <div key={x.k} className="flex items-baseline gap-3">
+              <dt className="w-5 shrink-0 font-display text-lg">{x.s}</dt>
+              <dd>
+                <span className="font-mono text-sm text-primary">{x.v}</span>
+                <span className="ml-2 text-xs text-muted-foreground">
+                  {x.k} · {x.from}
+                </span>
+              </dd>
+            </div>
+          ))}
+        </dl>
+      </section>
 
       <Stage
         n={1}
         title="The fall"
-        lead={
+        idea={
           <>
             <p>
-              Falling converts height into speed. Notice what is <em>missing</em>: mass. A feather
-              and a cannonball reach the water at the same speed, because gravity accelerates
-              everything equally — Galileo's point.
+              Falling turns height into speed. Notice what is missing from the formula: mass. A
+              feather and a cannonball arrive at the same speed.
             </p>
             <p>
-              Mass does decide what that speed is worth. Energy and momentum both scale with it, and
-              energy is what the water has to absorb.
+              Mass decides what that speed is <em>worth</em>. Energy is what the water must absorb,
+              and only a small slice of it — about {WAVE_EFFICIENCY * 100}% — leaves as waves. The
+              rest goes into spray, sound and churn.
             </p>
           </>
         }
         math={
           <>
-            <Formula>
-              <V>v</V> = √(2<V>gh</V>)
-            </Formula>
-            <Result hint={`falling ${fmt(object.dropHeight)} m`}>{fmt(im.v)} m/s</Result>
-            <Formula>
-              <V>E</V> = <V>mgh</V>
-            </Formula>
-            <Result
-              hint={`about ${WAVE_EFFICIENCY * 100}% leaves as waves — ${fmt(im.waveEnergy, 3)} J. The rest goes into spray, sound and churn.`}
-            >
-              {fmt(im.energy)} J
-            </Result>
+            <Work
+              name={<V>v</V>}
+              rows={[
+                <>√(2gh)</>,
+                <>
+                  √(2 × {G} × {fmt(h)})
+                </>,
+                <>{fmt(im.v)} m/s</>,
+              ]}
+            />
+            <Work
+              name={<V>E</V>}
+              rows={[
+                <>mgh</>,
+                <>
+                  {fmt(m, 3)} × {G} × {fmt(h)}
+                </>,
+                <>{fmt(im.energy)} J</>,
+              ]}
+            />
+            <Work
+              name={
+                <>
+                  <V>εE</V>
+                </>
+              }
+              rows={[
+                <>
+                  {WAVE_EFFICIENCY} × {fmt(im.energy)}
+                </>,
+                <>{fmt(im.waveEnergy, 3)} J as waves</>,
+              ]}
+            />
             <Levers
               items={[
-                { k: "twice as wide", v: "no change — speed and energy do not care about size" },
+                { k: "twice as wide", v: "no change — speed and energy ignore size" },
                 { k: "twice as heavy", v: shift(im.energy, heavier.energy, "J") },
                 { k: "twice as high", v: "speed ×1.41, energy ×2" },
               ]}
@@ -175,32 +268,41 @@ export function PhysicsGuide({
       <Stage
         n={2}
         title="The hole it punches"
-        lead={
+        idea={
           <>
             <p>
-              The object drives a crater into the surface, and two separate things limit how wide
-              that crater gets. It can never be narrower than the object itself. And it can never be
-              wider than the energy can afford, because opening a cavity means lifting water out of
-              it — which is where <V>E</V>/<V>ρg</V> comes from.
+              Two things limit how wide the crater gets. It can never be narrower than the object.
+              And it can never be wider than the energy can pay for, because opening a cavity means
+              lifting water out of it — that is where <V>E</V>/<V>ρg</V> comes from.
             </p>
             <p>
-              Whichever limit is larger wins.{" "}
+              The larger limit wins.{" "}
               {sizeLimited
-                ? "Right now the object's own width is the binding one: it is too big and slow to dig deeper than its own size."
-                : "Right now energy is the binding one: the object is small and fast enough to open a cavity wider than itself."}
+                ? "Right now the object's own width is binding: it is too big and slow to dig deeper than itself."
+                : "Right now energy is binding: it is small and fast enough to open a hole wider than itself."}
             </p>
           </>
         }
         math={
           <>
-            <Formula>
-              <V>R</V> = max( <V>r</V>, ½(<V>E</V>/<V>ρg</V>)<Sup>¼</Sup> )
-            </Formula>
-            <Result
-              hint={`object radius ${fmt(object.radius * 100)} cm · energy limit ${fmt(0.5 * Math.pow(im.energy / (RHO_WATER * G), 0.25) * 100)} cm`}
-            >
-              {fmt(im.craterRadius * 100)} cm
-            </Result>
+            <Work
+              name={<V>R</V>}
+              rows={[
+                <>
+                  max( r, ½(E/ρg)<Sup>¼</Sup> )
+                </>,
+                <>
+                  max( {fmt(r * 100)}, ½({fmt(im.energy)}/{RHO_WATER * G})<Sup>¼</Sup> × 100 ) cm
+                </>,
+                <>
+                  max( {fmt(r * 100)}, {fmt(energyLimit * 100)} ) = {fmt(im.craterRadius * 100)} cm
+                </>,
+              ]}
+            />
+            <Note>
+              The fourth root is why weight barely matters here: it takes sixteen times the energy
+              to double the hole.
+            </Note>
             <Levers
               items={[
                 {
@@ -209,7 +311,7 @@ export function PhysicsGuide({
                 },
                 {
                   k: "twice as heavy",
-                  v: `${shift(im.craterRadius * 100, heavier.craterRadius * 100, "cm")} — the fourth root makes weight a weak lever`,
+                  v: shift(im.craterRadius * 100, heavier.craterRadius * 100, "cm"),
                 },
               ]}
             />
@@ -220,29 +322,33 @@ export function PhysicsGuide({
       <Stage
         n={3}
         title="The wave that comes out"
-        lead={
+        idea={
           <>
             <p>
-              The crater collapses, and its rim sets the size of the wave that leaves. One full wave
-              — crest to crest — spans roughly the width of the hole that made it.
+              The crater collapses and its rim sets the size of the wave that leaves: one full wave,
+              crest to crest, spans about the width of the hole that made it.
             </p>
             <p>
-              Physicists usually work with the <em>wavenumber</em> <V>k</V> instead of the
-              wavelength: it counts how many radians of wave fit into a metre. Big slow waves have
-              small <V>k</V>; fine ripples have large <V>k</V>. Every formula after this uses it.
+              From here on the working uses the <em>wavenumber</em> <V>k</V> instead of the
+              wavelength — it counts radians of wave per metre. Long swells have small <V>k</V>;
+              fine ripples have large <V>k</V>.
             </p>
           </>
         }
         math={
           <>
-            <Formula>
-              <V>λ</V> ≈ 2<V>R</V>
-            </Formula>
-            <Result>{fmt(im.wavelength * 100)} cm</Result>
-            <Formula>
-              <V>k</V> = 2<V>π</V>/<V>λ</V>
-            </Formula>
-            <Result>{fmt(im.k, 1)} rad/m</Result>
+            <Work
+              name={<V>λ</V>}
+              rows={[
+                <>2R</>,
+                <>2 × {fmt(im.craterRadius * 100)} cm</>,
+                <>{fmt(im.wavelength * 100)} cm</>,
+              ]}
+            />
+            <Work
+              name={<V>k</V>}
+              rows={[<>2π/λ</>, <>2π / {fmt(im.wavelength, 4)}</>, <>{fmt(im.k, 1)} rad/m</>]}
+            />
             <Levers
               items={[
                 { k: "twice as wide", v: shift(im.wavelength * 100, wider.wavelength * 100, "cm") },
@@ -259,60 +365,68 @@ export function PhysicsGuide({
       <Stage
         n={4}
         title="How fast it travels"
-        lead={
+        idea={
           <>
             <p>
-              Water is <em>dispersive</em>: the speed of a wave depends on its wavelength, so a
-              single splash spreads into a train rather than one clean hoop. The relation below says
-              why, and it has two halves fighting each other.
+              Water is <em>dispersive</em>: speed depends on wavelength, so one splash spreads into
+              a train rather than a single hoop. Two forces compete. Gravity (<V>gk</V>) pulls long
+              waves along fastest; surface tension (<V>σk</V>
+              <Sup>3</Sup>/<V>ρ</V>) pushes short ones fastest.
             </p>
             <p>
-              The <V>gk</V> term is gravity pulling long waves along — bigger waves go faster. The{" "}
-              <V>σk</V>
-              <Sup>3</Sup>/<V>ρ</V> term is surface tension, the skin on the water, and it does the
-              opposite: shorter waves go faster. Gravity wins for big waves, tension for tiny ones,
-              and the handover sits at <V>λ</V> = {fmt(lambdaMin * 100)} cm — the slowest any ripple
-              can go, {fmt(cMin)} m/s.
-            </p>
-            <p>
-              Two speeds come out of this. Individual crests move at <V>c</V>. The visible ring —
-              the group of waves travelling together — moves at <V>c</V>
-              <Sub>g</Sub>, which is the one your eye follows. Crests appear at the back of the
-              group, run forward through it, and vanish off the front.
+              They trade places at <V>λ</V> = {fmt(lambdaMin * 100)} cm, where water is at its
+              slowest — {fmt(minimumSpeed(water))} m/s. Crests move at <V>c</V>; the visible ring
+              moves at <V>c</V>
+              <Sub>g</Sub>, which is slower, so crests appear at the back of the group, run forward
+              through it and vanish off the front.
             </p>
           </>
         }
         math={
           <>
-            <Formula>
-              <V>ω</V>
-              <Sup>2</Sup> = <V>gk</V> + <V>σk</V>
-              <Sup>3</Sup>/<V>ρ</V>
-            </Formula>
-            <Result hint={`one full oscillation takes T = ${fmt(im.period, 3)} s`}>
-              {fmt(im.omega, 1)} rad/s
-            </Result>
-            <Formula>
-              <V>c</V> = <V>ω</V>/<V>k</V> &nbsp;·&nbsp; <V>c</V>
-              <Sub>g</Sub> = d<V>ω</V>/d<V>k</V>
-            </Formula>
-            <Result
-              hint={`crests ${fmt(im.phaseSpeed)} m/s · the ring front ${fmt(im.groupSpeed)} m/s`}
-            >
-              {im.regime === "gravity" ? "gravity waves" : "capillary ripples"}
-            </Result>
-            <Levers
-              items={[
-                {
-                  k: "this object",
-                  v:
-                    im.regime === "gravity"
-                      ? `λ = ${fmt(im.wavelength * 100)} cm is above ${fmt(lambdaMin * 100)} cm, so gravity rules and bigger means faster`
-                      : `λ = ${fmt(im.wavelength * 100)} cm is below ${fmt(lambdaMin * 100)} cm, so surface tension rules and smaller means faster`,
-                },
-                { k: "twice as wide", v: shift(im.groupSpeed, wider.groupSpeed, "m/s") },
+            <Work
+              name={<V>ω</V>}
+              rows={[
+                <>
+                  √(gk + σk<Sup>3</Sup>/ρ)
+                </>,
+                <>
+                  √({G}×{fmt(im.k, 1)} + {fmt(sigma, 4)}×{fmt(im.k, 1)}
+                  <Sup>3</Sup>/{RHO_WATER})
+                </>,
+                <>{fmt(im.omega, 1)} rad/s</>,
               ]}
             />
+            <Work
+              name={<V>c</V>}
+              rows={[
+                <>ω/k</>,
+                <>
+                  {fmt(im.omega, 1)} / {fmt(im.k, 1)}
+                </>,
+                <>{fmt(im.phaseSpeed)} m/s</>,
+              ]}
+            />
+            <Work
+              name={
+                <>
+                  <V>c</V>
+                  <Sub>g</Sub>
+                </>
+              }
+              rows={[
+                <>
+                  (g + 3σk<Sup>2</Sup>/ρ) / 2ω
+                </>,
+                <>{fmt(im.groupSpeed)} m/s — the speed of the ring you see</>,
+              ]}
+            />
+            <Note>
+              {im.regime === "gravity"
+                ? `λ = ${fmt(im.wavelength * 100)} cm is longer than ${fmt(lambdaMin * 100)} cm, so gravity rules: bigger waves go faster.`
+                : `λ = ${fmt(im.wavelength * 100)} cm is shorter than ${fmt(lambdaMin * 100)} cm, so surface tension rules: smaller waves go faster.`}{" "}
+              One oscillation takes <V>T</V> = 2π/ω = {fmt(im.period, 3)} s.
+            </Note>
           </>
         }
       />
@@ -320,37 +434,51 @@ export function PhysicsGuide({
       <Stage
         n={5}
         title="How tall, and how long it rings"
-        lead={
+        idea={
           <>
             <p>
-              The wave energy has to spread over the first ring, an area of about 2<V>πRλ</V>.
-              Spread the same energy over a bigger ring and the crest is lower — which is also why
-              ripples fade as they travel outward, long before friction gets to them.
+              The wave energy spreads over the first ring, an area of about 2<V>πRλ</V>. Set the
+              energy equal to the ½<V>ρgA</V>
+              <Sup>2</Sup> it takes to lift that much water, and the crest height falls out.
             </p>
             <p>
-              Then viscosity drains them, and it is brutally selective: the rate goes as <V>k</V>
-              <Sup>2</Sup>. Halve the wavelength and the wave dies four times faster. That is why a
-              pond keeps its long swell for a while but loses its fine texture almost at once.
+              Then viscosity drains it, and the rate goes as <V>k</V>
+              <Sup>2</Sup> — halve the wavelength and it dies four times faster. That is why a pond
+              keeps its long swell but loses its fine texture at once.
             </p>
           </>
         }
         math={
           <>
-            <Formula>
-              <V>A</V> = √( 2<V>εE</V> / <V>ρg</V>·2<V>πRλ</V> )
-            </Formula>
-            <Result hint="height of the first crest">{fmt(im.amplitude * 1000)} mm</Result>
-            <Formula>
-              <V>γ</V> = 2<V>νk</V>
-              <Sup>2</Sup>
-            </Formula>
-            <Result
-              hint={`amplitude halves every ${fmt(halfLife, 1)} s from viscosity alone${
-                water.nu > NU_WATER * 1.5 ? " — this water is thicker than the real thing" : ""
-              }`}
-            >
-              {fmt(im.decay, 4)} /s
-            </Result>
+            <Work
+              name={<V>A</V>}
+              rows={[
+                <>√( 2εE / ρg·2πRλ )</>,
+                <>
+                  √( 2×{fmt(im.waveEnergy, 3)} / ({RHO_WATER * G} × {fmt(ringArea, 4)}) )
+                </>,
+                <>
+                  {fmt(im.amplitude, 4)} m = {fmt(im.amplitude * 1000)} mm
+                </>,
+              ]}
+            />
+            <Work
+              name={<V>γ</V>}
+              rows={[
+                <>
+                  2νk<Sup>2</Sup>
+                </>,
+                <>
+                  2 × {fmt(water.nu * 1e6, 2)}e−6 × {fmt(im.k, 1)}
+                  <Sup>2</Sup>
+                </>,
+                <>{fmt(im.decay, 4)} per second</>,
+              ]}
+            />
+            <Note>
+              Amplitude halves every ln2/<V>γ</V> = {fmt(halfLife, 1)} s from viscosity alone —
+              before that, spreading out over a wider and wider ring has already thinned it.
+            </Note>
             <Levers
               items={[
                 {
@@ -359,7 +487,7 @@ export function PhysicsGuide({
                 },
                 {
                   k: "twice as wide",
-                  v: `${shift(im.amplitude * 1000, wider.amplitude * 1000, "mm")} — the same energy spread over a longer ring`,
+                  v: `${shift(im.amplitude * 1000, wider.amplitude * 1000, "mm")} — same energy, longer ring`,
                 },
               ]}
             />
@@ -369,57 +497,72 @@ export function PhysicsGuide({
 
       <Stage
         n={6}
-        title="The splash, and what the object does next"
-        lead={
+        title="The splash, and what happens next"
+        idea={
           <>
             <p>
-              Whether the crown of water tears into droplets is a contest between inertia, which
-              wants to fling water outward, and surface tension, which wants to hold the sheet
-              together. The Weber number is their ratio. Below about 50 the skin holds; above it the
-              rim breaks into beads — and every bead that falls back starts a ripple of its own.
+              Whether the crown tears into droplets is a contest between inertia, flinging water
+              outward, and surface tension, holding the sheet together. Below about <V>We</V> = 50
+              the skin holds; above it the rim breaks into beads, and every bead that falls back
+              starts a ripple of its own.
             </p>
             <p>
-              Afterwards the object is simply denser or lighter than water.{" "}
+              Then it is simply a question of density.{" "}
               {im.floats
-                ? "This one floats, so it keeps bobbing on its own buoyancy and radiating waves long after the splash."
-                : "This one sinks, so once it is under, the surface is left to ring down on its own."}
+                ? "This one floats, so it keeps bobbing and radiating long after the splash."
+                : "This one sinks, and the surface is left to ring down alone."}
             </p>
           </>
         }
         math={
           <>
-            <Formula>
-              <V>We</V> = <V>ρv</V>
-              <Sup>2</Sup>
-              <V>r</V>/<V>σ</V>
-            </Formula>
-            <Result
-              hint={
-                im.droplets > 0
-                  ? `inertia wins — roughly ${im.droplets} droplets thrown off`
-                  : "surface tension wins — the crown holds together"
+            <Work
+              name={<V>We</V>}
+              rows={[
+                <>
+                  ρv<Sup>2</Sup>r/σ
+                </>,
+                <>
+                  {RHO_WATER} × {fmt(im.v)}
+                  <Sup>2</Sup> × {fmt(r, 3)} / {fmt(sigma, 4)}
+                </>,
+                <>
+                  {fmt(im.weber, 0)} —{" "}
+                  {im.droplets > 0 ? `about ${im.droplets} droplets` : "no droplets"}
+                </>,
+              ]}
+            />
+            <Work
+              name={
+                <>
+                  <V>ρ</V>
+                  <Sub>o</Sub>
+                </>
               }
-            >
-              {fmt(im.weber, 0)}
-            </Result>
-            <Formula>
-              <V>ρ</V>
-              <Sub>o</Sub> = <V>m</V>/(⁴⁄₃<V>πr</V>
-              <Sup>3</Sup>)
-            </Formula>
-            <Result
-              hint={
-                im.floats
-                  ? `lighter than water — it bobs at ${fmt(im.bobOmega / (2 * Math.PI))} Hz`
-                  : `${fmt(im.density / RHO_WATER, 1)}× denser than water — it sinks`
-              }
-            >
-              {fmt(im.density, 0)} kg/m³
-            </Result>
+              rows={[
+                <>
+                  m / (⁴⁄₃πr<Sup>3</Sup>)
+                </>,
+                <>
+                  {fmt(m, 3)} / {fmt(im.volume, 5)}
+                </>,
+                <>
+                  {fmt(im.density, 0)} kg/m³ — {im.floats ? "floats" : "sinks"}
+                </>,
+              ]}
+            />
+            {im.floats && (
+              <Note>
+                It sits {fmt(im.submerged * 100, 0)}% submerged and bobs at{" "}
+                {fmt(im.bobOmega / (2 * Math.PI))} Hz, set by the width of its waterline, not of its
+                equator.
+              </Note>
+            )}
           </>
         }
       />
 
+      {/* The solver */}
       <section className="glass p-6 md:p-7">
         <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
           Step 7 · under the hood
@@ -428,33 +571,32 @@ export function PhysicsGuide({
           What the simulation actually solves
         </h3>
         <p className="mt-3 max-w-3xl text-sm leading-relaxed text-muted-foreground">
-          The six steps above are closed-form estimates for a single ripple. The water you are
-          looking at is not drawn from them — it is integrated, cell by cell, from one equation for
-          the surface height <V>η</V>. Each term buys one behaviour you can see.
+          The six steps above are closed-form estimates for a single ripple. The water on screen is
+          not drawn from them — it is integrated, cell by cell, from one equation for the surface
+          height <V>η</V>. Each term buys one behaviour you can see.
         </p>
-        <div className="mt-5 rounded-xl bg-secondary/35 p-5">
-          <Formula>
+        <div className="mt-5 rounded-xl bg-secondary/35 p-5 text-center">
+          <p className="font-display text-2xl leading-snug md:text-[1.75rem]">
             <V>η</V>
             <Sub>tt</Sub> = ∇·( <V>c</V>
             <Sup>2</Sup>(<V>η</V>)∇<V>η</V> ) − <V>β</V>∇<Sup>4</Sup>
             <V>η</V> + <V>ν</V>∇<Sup>2</Sup>
             <V>η</V>
             <Sub>t</Sub>
-          </Formula>
+          </p>
         </div>
         <dl className="mt-5 grid gap-4 md:grid-cols-3">
           {[
             {
-              t: "transport, and it is nonlinear",
+              t: "transport, nonlinear",
               f: (
                 <>
-                  ∇·( <V>c</V>
-                  <Sup>2</Sup>(<V>η</V>)∇<V>η</V> ), with <V>c</V>
+                  <V>c</V>
                   <Sup>2</Sup>(<V>η</V>) = <V>c</V>
                   <Sup>2</Sup>(1 + <V>αη</V>)
                 </>
               ),
-              d: "Wave speed depends on the height of the water it is passing through, so crests travel faster than troughs. That is what makes two rings interact where they meet — trading energy and radiating new waves — instead of sliding through each other untouched.",
+              d: "Wave speed depends on the height of the water it passes through, so crests travel faster than troughs. That is why two rings interact where they meet instead of sliding through each other untouched.",
             },
             {
               t: "dispersion",
@@ -464,7 +606,7 @@ export function PhysicsGuide({
                   <V>η</V>
                 </>
               ),
-              d: "Stiffens short waves so they outrun long ones, exactly as surface tension does in step 4. Without it every impact would leave one lonely hoop; with it you get a spreading train.",
+              d: "Stiffens short waves so they outrun long ones, as surface tension does in step 4. Without it every impact would leave one lonely hoop instead of a spreading train.",
             },
             {
               t: "viscosity",
@@ -475,7 +617,7 @@ export function PhysicsGuide({
                   <Sub>t</Sub>
                 </>
               ),
-              d: "Drains the surface at a rate that climbs with k², so fine chop dies in moments and the long swell rolls on — the same selectivity as γ in step 5.",
+              d: "Drains the surface at a rate climbing with k², so fine chop dies in moments and the long swell rolls on — the same selectivity as γ in step 5.",
             },
           ].map((x) => (
             <div key={x.t} className="rounded-lg border border-border p-4">
@@ -486,18 +628,74 @@ export function PhysicsGuide({
           ))}
         </dl>
         <p className="mt-5 max-w-3xl text-sm leading-relaxed text-muted-foreground">
-          One rule sits on top of the equation. Real water spills when a crest gets too{" "}
-          <em>steep</em> — not too tall, too steep — so any crest whose slope passes the limit sheds
-          the excess as foam. A crest that suddenly loses height is itself a fresh disturbance, and
-          it radiates. That is a new wave, born from an old one breaking.
+          One rule sits on top. Real water spills when a crest gets too <em>steep</em> — not too
+          tall, too steep — so any crest past the slope limit sheds its excess as foam. A crest that
+          suddenly loses height is itself a new disturbance, and it radiates. That is a new wave,
+          born from an old one breaking.
         </p>
       </section>
 
-      <p className="pt-2 text-center font-mono text-xs text-muted-foreground">
-        g = {G} m/s² · ρ = {RHO_WATER} kg/m³ · σ = {fmt(water.sigma, 4)} N/m · ν ={" "}
-        {fmt(water.nu * 1e6, 2)} mm²/s · tank 1.6 m across · scaling laws simplified for
-        illustration
-      </p>
+      {/* Everything, in one place */}
+      <section className="glass p-6 md:p-7">
+        <h3 className="font-display text-xl font-light">Every number, in one place</h3>
+        <div className="mt-4 overflow-x-auto">
+          <table className="w-full min-w-[34rem] text-left text-sm">
+            <thead className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
+              <tr>
+                <th className="pb-2 pr-4 font-normal">symbol</th>
+                <th className="pb-2 pr-4 font-normal">what it is</th>
+                <th className="pb-2 pr-4 font-normal">value</th>
+                <th className="pb-2 font-normal">from</th>
+              </tr>
+            </thead>
+            <tbody className="align-baseline">
+              {[
+                [<V key="v">v</V>, "impact speed", `${fmt(im.v)} m/s`, "step 1"],
+                [<V key="E">E</V>, "impact energy", `${fmt(im.energy)} J`, "step 1"],
+                [<V key="R">R</V>, "cavity radius", `${fmt(im.craterRadius * 100)} cm`, "step 2"],
+                [<V key="l">λ</V>, "wavelength", `${fmt(im.wavelength * 100)} cm`, "step 3"],
+                [<V key="k">k</V>, "wavenumber", `${fmt(im.k, 1)} rad/m`, "step 3"],
+                [<V key="w">ω</V>, "angular frequency", `${fmt(im.omega, 1)} rad/s`, "step 4"],
+                [<V key="T">T</V>, "wave period", `${fmt(im.period, 3)} s`, "step 4"],
+                [<V key="c">c</V>, "crest speed", `${fmt(im.phaseSpeed)} m/s`, "step 4"],
+                [
+                  <span key="cg">
+                    <V>c</V>
+                    <Sub>g</Sub>
+                  </span>,
+                  "speed of the ring",
+                  `${fmt(im.groupSpeed)} m/s`,
+                  "step 4",
+                ],
+                [<V key="A">A</V>, "crest height", `${fmt(im.amplitude * 1000)} mm`, "step 5"],
+                [<V key="g2">γ</V>, "viscous decay", `${fmt(im.decay, 4)} /s`, "step 5"],
+                [<V key="We">We</V>, "splash number", `${fmt(im.weber, 0)}`, "step 6"],
+                [
+                  <span key="ro">
+                    <V>ρ</V>
+                    <Sub>o</Sub>
+                  </span>,
+                  "object density",
+                  `${fmt(im.density, 0)} kg/m³`,
+                  "step 6",
+                ],
+              ].map((row, i) => (
+                <tr key={i} className="border-t border-border">
+                  <td className="py-2 pr-4 font-display text-base">{row[0]}</td>
+                  <td className="py-2 pr-4 text-muted-foreground">{row[1] as string}</td>
+                  <td className="py-2 pr-4 font-mono text-primary">{row[2] as string}</td>
+                  <td className="py-2 font-mono text-[11px] text-muted-foreground">
+                    {row[3] as string}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="mt-4 text-xs text-muted-foreground">
+          Scaling laws are simplified for illustration; the tank is 1.6 m across.
+        </p>
+      </section>
     </div>
   );
 }

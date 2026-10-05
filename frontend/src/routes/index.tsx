@@ -3,8 +3,8 @@ import { useEffect, useMemo, useState } from "react";
 
 import { IntroSplash } from "@/components/intro-splash";
 import { ObjectDial } from "@/components/object-dial";
-import { DEFAULT_LOOK, MATERIAL_LOOKS, OBJECT_LOOKS, lookByName } from "@/lib/object-looks";
 import { PhysicsGuide } from "@/components/physics-guide";
+import { DEFAULT_LOOK, MATERIAL_LOOKS, OBJECT_LOOKS, lookByName } from "@/lib/object-looks";
 import {
   RipplePool,
   type PoolStats,
