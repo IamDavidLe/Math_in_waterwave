@@ -7,7 +7,7 @@ import {
   analyticProfile,
   impactOf,
 } from "@/lib/water-physics";
-import { type Body, type SimConfig, WaterSim } from "@/lib/water-sim";
+import { MARK_LIFE, type SimConfig, WaterSim, metresPerUnit } from "@/lib/water-sim";
 
 export type SolverControls = Pick<
   SimConfig,
@@ -26,7 +26,10 @@ export type PoolStats = {
   frameMs: number;
 };
 
+export type PoolView = "top" | "side" | "both";
+
 type Props = {
+  view: PoolView;
   object: ObjectParams;
   water: WaterParams;
   solver: SolverControls;
@@ -85,15 +88,18 @@ function buildFloor(w: number, h: number) {
   return floor;
 }
 
-export function RipplePool({ object, water, solver, paused, onImpact, onStats }: Props) {
+export function RipplePool({ view, object, water, solver, paused, onImpact, onStats }: Props) {
   const waterRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
+  const sideRef = useRef<HTMLCanvasElement>(null);
   const chartRef = useRef<HTMLCanvasElement>(null);
   const simRef = useRef<WaterSim | null>(null);
 
   // Live props, read inside the animation loop without restarting it.
-  const live = useRef({ object, water, solver, paused, onImpact, onStats });
-  live.current = { object, water, solver, paused, onImpact, onStats };
+  const live = useRef({ view, object, water, solver, paused, onImpact, onStats });
+  live.current = { view, object, water, solver, paused, onImpact, onStats };
+  /** Row of the grid the side view cuts through, 0–1 down the tank. */
+  const slice = useRef(0.5);
 
   useEffect(() => {
     const sim = new WaterSim({ ...live.current.solver });
@@ -112,6 +118,10 @@ export function RipplePool({ object, water, solver, paused, onImpact, onStats }:
     const octx = overlay.getContext("2d")!;
 
     let last: { impact: Impact; x: number; y: number; t0: number } | null = null;
+    // Wavenumber and the solver→metres scale of the ripple now on the water;
+    // the side view needs both to draw orbits and to state its exaggeration.
+    let lastK = impactOf(live.current.object, live.current.water).k;
+    let lastMetresPerUnit = metresPerUnit(impactOf(live.current.object, live.current.water));
     let breaks = 0;
     let splashbacks = 0;
     let statAt = 0;
@@ -254,6 +264,17 @@ export function RipplePool({ object, water, solver, paused, onImpact, onStats }:
         octx.fill();
       }
 
+      // Where crests broke — each one is a wave that was just born.
+      for (const m of sim.marks) {
+        const age = (sim.time - m.t) / MARK_LIFE;
+        if (age > 1) continue;
+        octx.strokeStyle = `rgba(190,240,255,${(1 - age) * 0.5})`;
+        octx.lineWidth = Math.max(1, 1.5 * dpr * (1 - age));
+        octx.beginPath();
+        octx.arc(m.x * sx, m.y * sy, (2 + age * 16) * sx, 0, Math.PI * 2);
+        octx.stroke();
+      }
+
       for (const d of sim.droplets) {
         const z = Math.max(0, d.z);
         const r = Math.max(0.9, d.r * sx * (1 + z * 2.2));
@@ -263,6 +284,208 @@ export function RipplePool({ object, water, solver, paused, onImpact, onStats }:
         octx.arc(d.x * sx, cy, r, 0, Math.PI * 2);
         octx.fill();
       }
+
+      // Where the side view is cutting. Draggable, so you can take the slice
+      // anywhere across the tank.
+      if (live.current.view !== "top") {
+        const y = slice.current * oh;
+        octx.strokeStyle = "oklch(0.8 0.13 75 / 0.85)";
+        octx.lineWidth = 1.5 * dpr;
+        octx.setLineDash([7 * dpr, 6 * dpr]);
+        octx.beginPath();
+        octx.moveTo(0, y);
+        octx.lineTo(ow, y);
+        octx.stroke();
+        octx.setLineDash([]);
+        octx.fillStyle = "oklch(0.8 0.13 75 / 0.9)";
+        for (const hx of [10 * dpr, ow - 10 * dpr]) {
+          octx.beginPath();
+          octx.arc(hx, y, 4 * dpr, 0, Math.PI * 2);
+          octx.fill();
+        }
+      }
+    };
+
+    /* ── side view: a slice straight through the tank ───────────────────── */
+    // Depth is drawn to its own true scale (one wavelength's worth of water),
+    // while the surface displacement is exaggerated — crests here are
+    // millimetres on a tank 1.6 m wide, and nothing would be visible at 1:1.
+    // The view says by how much, so the exaggeration is never a lie.
+    const prevRow = new Float32Array(W);
+    let sideGain = 40;
+    const drawSide = () => {
+      const cv = sideRef.current;
+      if (!cv || live.current.view === "top") return;
+      const rect = cv.getBoundingClientRect();
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const CW = Math.max(1, Math.round(rect.width * dpr));
+      const CH = Math.max(1, Math.round(rect.height * dpr));
+      if (cv.width !== CW || cv.height !== CH) {
+        cv.width = CW;
+        cv.height = CH;
+      }
+      const g = cv.getContext("2d")!;
+      const row = Math.max(1, Math.min(H - 2, Math.round(slice.current * H)));
+      const eta = sim.cur;
+      const base = row * W;
+      const sx = CW / (W - 1);
+      const waterline = CH * 0.45;
+
+      // Exposure for the slice alone, so a quiet cut is still readable.
+      let peak = 1e-5;
+      let peakX = W >> 1;
+      for (let x = 0; x < W; x++) {
+        const a = Math.abs(eta[base + x]!);
+        if (a > peak) {
+          peak = a;
+          peakX = x;
+        }
+      }
+      // Aim for a crest about a quarter of the view tall whatever the wave's
+      // real size, so a bowling ball and a raindrop are both readable.
+      const want = Math.max(8, Math.min(6000, (CH * 0.26) / peak));
+      sideGain += (want - sideGain) * (want < sideGain ? 0.3 : 0.04);
+
+      g.clearRect(0, 0, CW, CH);
+
+      // air
+      const air = g.createLinearGradient(0, 0, 0, waterline);
+      air.addColorStop(0, "#07131c");
+      air.addColorStop(1, "#0d2230");
+      g.fillStyle = air;
+      g.fillRect(0, 0, CW, waterline);
+
+      // the surface itself
+      const surfaceY = (x: number) => waterline - eta[base + x]! * sideGain;
+      g.beginPath();
+      g.moveTo(0, surfaceY(0));
+      for (let x = 1; x < W; x++) g.lineTo(x * sx, surfaceY(x));
+      g.lineTo(CW, CH);
+      g.lineTo(0, CH);
+      g.closePath();
+      const body = g.createLinearGradient(0, waterline, 0, CH);
+      body.addColorStop(0, "oklch(0.52 0.08 215 / 0.85)");
+      body.addColorStop(0.35, "oklch(0.34 0.06 220 / 0.9)");
+      body.addColorStop(1, "oklch(0.2 0.04 228)");
+      g.fillStyle = body;
+      g.fill();
+
+      // still-water reference
+      g.strokeStyle = "rgba(190,225,240,0.18)";
+      g.setLineDash([5 * dpr, 5 * dpr]);
+      g.lineWidth = dpr;
+      g.beginPath();
+      g.moveTo(0, waterline);
+      g.lineTo(CW, waterline);
+      g.stroke();
+      g.setLineDash([]);
+
+      // the surface line, bright where it is steep
+      g.beginPath();
+      g.moveTo(0, surfaceY(0));
+      for (let x = 1; x < W; x++) g.lineTo(x * sx, surfaceY(x));
+      g.strokeStyle = "oklch(0.86 0.11 195)";
+      g.lineWidth = 2 * dpr;
+      g.stroke();
+
+      /* Water does not travel with the wave — it circles in place. Each dot
+         sits at its rest position displaced by (ξx, ξz) = ((1/k)∂η/∂x, η)·e^(kz),
+         the exact linear deep-water orbit, so the dots trace circles that
+         shrink with depth as the wave passes. */
+      const k = Math.max(4, lastK);
+      const lambdaCells = (2 * Math.PI) / k / sim.metersPerCell;
+      const shownDepth = Math.max(8, Math.min(CH - waterline - 4 * dpr, CH - waterline));
+      const depths = [0, 0.125, 0.25, 0.375, 0.5];
+      let guideDrawn = false;
+      for (const frac of depths) {
+        const zMetres = -frac * ((2 * Math.PI) / k);
+        const decay = Math.exp(k * zMetres);
+        const yRest = waterline + (frac / 0.5) * shownDepth * 0.92;
+        for (let px = 20 * dpr; px < CW; px += 30 * dpr) {
+          const x = Math.round(px / sx);
+          if (x < 1 || x > W - 2) continue;
+          const dEta = (eta[base + x + 1]! - eta[base + x - 1]!) * 0.5;
+          // (1/k)∂η/∂x in cells → the same units η is drawn in
+          const xiX = (dEta / (k * sim.metersPerCell)) * decay;
+          const xiZ = eta[base + x]! * decay;
+          const r = peak * decay * sideGain;
+          // One orbit drawn out in full, so the circling is unmistakable —
+          // placed on the tallest wave in the cut, where it means something.
+          if (!guideDrawn && frac > 0 && r > 3 * dpr && Math.abs(x - peakX) < 16) {
+            g.strokeStyle = "rgba(190,240,255,0.22)";
+            g.lineWidth = dpr;
+            g.beginPath();
+            g.arc(px, yRest, r, 0, Math.PI * 2);
+            g.stroke();
+            guideDrawn = true;
+          }
+          g.beginPath();
+          g.arc(px + xiX * sideGain, yRest - xiZ * sideGain, 2.1 * dpr, 0, Math.PI * 2);
+          g.fillStyle = `rgba(206,240,252,${0.25 + 0.5 * decay})`;
+          g.fill();
+        }
+      }
+
+      // foam where crests broke, and the objects and spray near this slice
+      for (const m of sim.marks) {
+        const near = Math.abs(m.y - row);
+        if (near > 6) continue;
+        const age = (sim.time - m.t) / MARK_LIFE;
+        if (age > 1) continue;
+        g.fillStyle = `rgba(226,244,252,${(1 - age) * 0.55 * (1 - near / 6)})`;
+        g.beginPath();
+        g.arc(m.x * sx, surfaceY(Math.round(m.x)) - 2 * dpr, (2 + 5 * age) * dpr, 0, Math.PI * 2);
+        g.fill();
+      }
+
+      const mpu = lastMetresPerUnit;
+      for (const b of sim.bodies) {
+        const near = Math.abs(b.y - row);
+        if (near > 10) continue;
+        const r = Math.max(3 * dpr, (b.impact.craterRadius / sim.metersPerCell) * 0.6 * sx);
+        const cx = b.x * sx;
+        const fade = 1 - near / 10;
+        // z is metres for a falling or sinking body, solver units for a floater
+        const dy = b.state === "floating" ? -b.z * sideGain : (-b.z / mpu) * sideGain;
+        g.globalAlpha = fade;
+        g.fillStyle = b.state === "sinking" ? "rgba(10,34,46,0.95)" : "rgba(232,244,250,0.95)";
+        g.beginPath();
+        g.arc(cx, waterline + dy, r, 0, Math.PI * 2);
+        g.fill();
+        g.globalAlpha = 1;
+      }
+      for (const d of sim.droplets) {
+        const near = Math.abs(d.y - row);
+        if (near > 10) continue;
+        g.fillStyle = `rgba(228,244,252,${0.75 * (1 - near / 10)})`;
+        g.beginPath();
+        g.arc(
+          d.x * sx,
+          waterline - (d.z / mpu) * sideGain,
+          Math.max(1.2 * dpr, d.r * sx),
+          0,
+          Math.PI * 2,
+        );
+        g.fill();
+      }
+
+      // honest labels
+      const exaggeration = sideGain / mpu / (CW / sim.cfg.metersAcross);
+      g.fillStyle = "rgba(190,225,240,0.65)";
+      g.font = `${11 * dpr}px JetBrains Mono, monospace`;
+      g.fillText(
+        `vertical ×${exaggeration < 10 ? exaggeration.toFixed(1) : exaggeration.toFixed(0)}`,
+        10 * dpr,
+        18 * dpr,
+      );
+      g.fillText(
+        `depth shown: λ/2 ≈ ${(((lambdaCells * sim.metersPerCell) / 2) * 100).toFixed(1)} cm`,
+        10 * dpr,
+        CH - 10 * dpr,
+      );
+      g.fillText("water circles in place", CW - 150 * dpr, CH - 10 * dpr);
+
+      for (let x = 0; x < W; x++) prevRow[x]! = eta[base + x]!;
     };
 
     /* ── measured vs predicted cross-section ────────────────────────────── */
@@ -361,11 +584,20 @@ export function RipplePool({ object, water, solver, paused, onImpact, onStats }:
           breaks = 0;
           splashbacks = 0;
           last = { impact: body.impact, x: body.x, y: body.y, t0: performance.now() };
+          lastK = body.impact.k;
+          lastMetresPerUnit = metresPerUnit(body.impact);
+          // Cut the slice through whatever just landed, so the side view is
+          // looking at the splash rather than at flat water beside it.
+          slice.current = body.y / H;
           impactCb?.(body.impact);
         }
       }
-      drawWater();
-      drawOverlay();
+      const showTop = live.current.view !== "side";
+      if (showTop) {
+        drawWater();
+        drawOverlay();
+      }
+      drawSide();
       drawChart();
       frameMs = frameMs * 0.9 + (performance.now() - t0) * 0.1;
       if (statsCb && t0 - statAt > 120) {
@@ -400,34 +632,84 @@ export function RipplePool({ object, water, solver, paused, onImpact, onStats }:
     };
   }, []);
 
-  const pointer = (e: React.PointerEvent<HTMLDivElement>, dragging: boolean) => {
+  /** Grabbing the dashed line moves the slice; anywhere else drops or stirs. */
+  const draggingSlice = useRef(false);
+
+  const pointer = (e: React.PointerEvent<HTMLDivElement>, held: boolean) => {
     const sim = simRef.current;
     if (!sim) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const nx = (e.clientX - rect.left) / rect.width;
     const ny = (e.clientY - rect.top) / rect.height;
     if (nx < 0 || ny < 0 || nx > 1 || ny > 1) return;
-    if (dragging) {
+
+    if (held && draggingSlice.current) {
+      slice.current = ny;
+      return;
+    }
+    if (!held) {
+      const onLine = view !== "top" && Math.abs(ny - slice.current) * rect.height < 12;
+      draggingSlice.current = onLine;
+      if (onLine) {
+        slice.current = ny;
+        return;
+      }
+    }
+    if (held) {
       sim.stir(nx, ny, 0.07, 2.5);
       return;
     }
     sim.drop(nx, ny, impactOf(live.current.object, live.current.water));
   };
 
+  /** Clicking the side view drops onto the line it is cutting. */
+  const dropFromSide = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const sim = simRef.current;
+    if (!sim) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const nx = (e.clientX - rect.left) / rect.width;
+    if (nx < 0 || nx > 1) return;
+    sim.drop(nx, slice.current, impactOf(live.current.object, live.current.water));
+  };
+
   return (
     <>
-      <div
-        className="glass relative overflow-hidden p-0"
-        onPointerDown={(e) => pointer(e, false)}
-        onPointerMove={(e) => (e.buttons === 1 ? pointer(e, true) : undefined)}
-      >
-        <canvas
-          ref={waterRef}
-          className="block aspect-[8/5] w-full cursor-crosshair touch-none"
-          aria-label="Water surface simulation. Click to drop the object, drag to stir."
-        />
-        <canvas ref={overlayRef} className="pointer-events-none absolute inset-0 h-full w-full" />
+      {/* Both views stay mounted — the draw loop binds each canvas context
+          once, so unmounting one would leave it blank when it came back. */}
+      <div className={view === "side" ? "hidden" : "contents"}>
+        <div
+          className="glass relative overflow-hidden p-0"
+          onPointerDown={(e) => pointer(e, false)}
+          onPointerUp={() => (draggingSlice.current = false)}
+          onPointerLeave={() => (draggingSlice.current = false)}
+          onPointerMove={(e) => (e.buttons === 1 ? pointer(e, true) : undefined)}
+        >
+          <canvas
+            ref={waterRef}
+            className="block aspect-[8/5] w-full cursor-crosshair touch-none"
+            aria-label="Water surface seen from above. Click to drop the object, drag to stir."
+          />
+          <canvas ref={overlayRef} className="pointer-events-none absolute inset-0 h-full w-full" />
+        </div>
       </div>
+
+      <div className={view === "top" ? "hidden" : "contents"}>
+        <div className="glass overflow-hidden p-0">
+          <div className="flex items-baseline justify-between gap-4 px-5 pt-4">
+            <h2 className="font-display text-xl">Side view</h2>
+            <span className="font-mono text-[11px] text-muted-foreground">
+              {view === "side" ? "click to drop" : "drag the dashed line above to move the cut"}
+            </span>
+          </div>
+          <canvas
+            ref={sideRef}
+            onPointerDown={dropFromSide}
+            className={`mt-3 block h-[220px] w-full touch-none ${view === "side" ? "cursor-crosshair" : ""}`}
+            aria-label="The water surface cut through side-on, showing wave shape and the orbits water follows as a wave passes."
+          />
+        </div>
+      </div>
+
       <div className="glass p-5">
         <div className="mb-3 flex items-baseline justify-between gap-4">
           <h2 className="font-display text-xl">Cross-section η(r, t)</h2>

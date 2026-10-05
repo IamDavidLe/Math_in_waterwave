@@ -138,6 +138,25 @@ export type FrameReport = {
   splashbacks: number;
 };
 
+/**
+ * Crest height in solver units. Real amplitudes span four decades between a
+ * raindrop and a bowling ball, so they are compressed onto 0–1.1: saturating
+ * rather than clipping keeps the whole range distinguishable on screen and
+ * keeps the integrator inside its stability margin.
+ */
+export function solverAmplitude(impact: Impact): number {
+  return Math.max(0.02, 1.1 * (1 - Math.exp(-impact.amplitude / 0.03)));
+}
+
+/**
+ * Metres of real crest per solver unit, for this impact. The compression above
+ * is not linear, so this is only valid near that impact's own amplitude — it
+ * exists so a view can say honestly how far it is exaggerating the vertical.
+ */
+export function metresPerUnit(impact: Impact): number {
+  return impact.amplitude / solverAmplitude(impact);
+}
+
 /** A volume-conserving crater: a bowl with a raised rim (∫ = 0 in 2D). */
 function crater(u: number): number {
   const u2 = u * u;
@@ -214,14 +233,8 @@ export class WaterSim {
     return body;
   }
 
-  /**
-   * Crest height in solver units. Real amplitudes span four decades between a
-   * raindrop and a bowling ball, so they are compressed onto 0–1.1: saturating
-   * rather than clipping keeps the whole range distinguishable on screen and
-   * keeps the integrator inside its stability margin.
-   */
   private amplitudeOf(impact: Impact): number {
-    return Math.max(0.02, 1.1 * (1 - Math.exp(-impact.amplitude / 0.03)));
+    return solverAmplitude(impact);
   }
 
   /** Stamp a crater at (x, y) with zero initial velocity. */

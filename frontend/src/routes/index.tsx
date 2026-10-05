@@ -3,7 +3,12 @@ import { useEffect, useMemo, useState } from "react";
 
 import { ObjectDial } from "@/components/object-dial";
 import { PhysicsGuide } from "@/components/physics-guide";
-import { RipplePool, type PoolStats, type SolverControls } from "@/components/ripple-pool";
+import {
+  RipplePool,
+  type PoolStats,
+  type PoolView,
+  type SolverControls,
+} from "@/components/ripple-pool";
 import {
   G,
   NU_WATER,
@@ -77,13 +82,14 @@ type WaveImpact = { x: number; startedAt: number };
 function WaveFigure() {
   const [impact, setImpact] = useState<WaveImpact | null>(null);
   const [elapsed, setElapsed] = useState(0);
+  const dropDuration = 0.52;
 
   useEffect(() => {
     if (!impact) return;
     let frame = 0;
     const animate = () => {
       const age = (performance.now() - impact.startedAt) / 1000;
-      if (age >= 6) {
+      if (age >= 6.5) {
         setImpact(null);
         setElapsed(0);
         return;
@@ -97,10 +103,11 @@ function WaveFigure() {
 
   const wavePath = useMemo(() => {
     if (!impact) return "M20 132H540";
+    const waveAge = Math.max(0, elapsed - dropDuration);
     const points: string[] = [];
     for (let x = 20; x <= 540; x += 4) {
       const distance = Math.abs(x - impact.x);
-      const arrival = elapsed - distance / 155;
+      const arrival = waveAge - distance / 155;
       const height =
         arrival > 0
           ? 52 *
@@ -111,7 +118,7 @@ function WaveFigure() {
       points.push(`${x === 20 ? "M" : "L"}${x.toFixed(1)} ${(132 - height).toFixed(1)}`);
     }
     return points.join(" ");
-  }, [elapsed, impact]);
+  }, [dropDuration, elapsed, impact]);
 
   const dropObject = (event: React.MouseEvent<SVGSVGElement>) => {
     const bounds = event.currentTarget.getBoundingClientRect();
@@ -120,14 +127,21 @@ function WaveFigure() {
     setImpact({ x, startedAt: performance.now() });
   };
 
-  const isWaving = Boolean(impact);
-  const dropY = impact ? Math.min(108, 18 + elapsed * 240) : 18;
+  const isWaving = Boolean(impact) && elapsed >= dropDuration;
+  const fallProgress = Math.min(1, elapsed / dropDuration);
+  const dropY = 18 + (132 - 18) * fallProgress ** 2;
 
   return (
     <figure className="wave-figure" aria-labelledby="wave-figure-caption">
       <div className="wave-figure__topline">
         <span>Wave equation</span>
-        <span>{isWaving ? `t = ${elapsed.toFixed(2)} s` : "surface at rest"}</span>
+        <span>
+          {isWaving
+            ? `t = ${(elapsed - dropDuration).toFixed(2)} s`
+            : impact
+              ? "object falling"
+              : "surface at rest"}
+        </span>
       </div>
       <svg
         className="wave-figure__surface"
@@ -174,7 +188,7 @@ function WaveFigure() {
             cos ωt
           </text>
         </g>
-        {impact && (
+        {impact && elapsed <= dropDuration && (
           <g className="wave-figure__drop" aria-hidden="true">
             <line x1={impact.x} x2={impact.x} y1="20" y2={dropY - 9} />
             <circle cx={impact.x} cy={dropY} r="7" />
@@ -209,6 +223,7 @@ function Index() {
   const [reflect, setReflect] = useState(true);
   const [breaking, setBreaking] = useState(true);
   const [paused, setPaused] = useState(false);
+  const [view, setView] = useState<PoolView>("both");
   const [stats, setStats] = useState<PoolStats | null>(null);
 
   const water: WaterParams = useMemo(() => ({ sigma, nu: NU_WATER * nuMult }), [sigma, nuMult]);
@@ -278,7 +293,43 @@ function Index() {
 
       <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
         <section className="space-y-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-muted-foreground">
+              {view === "top"
+                ? "Looking down on the tank."
+                : view === "side"
+                  ? "Cutting straight through the water."
+                  : "From above, and cut through — the dashed line is where the cut is taken."}
+            </p>
+            <div
+              role="group"
+              aria-label="Point of view"
+              className="flex gap-1 rounded-full border border-border p-1"
+            >
+              {(
+                [
+                  ["top", "Top"],
+                  ["side", "Side"],
+                  ["both", "Both"],
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  onClick={() => setView(id)}
+                  aria-pressed={view === id}
+                  className={`rounded-full px-3 py-1 text-xs transition-colors ${
+                    view === id
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-secondary"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
           <RipplePool
+            view={view}
             object={object}
             water={water}
             solver={solver}
@@ -371,64 +422,6 @@ function Index() {
                 setMass(o.mass);
               }}
             />
-          </div>
-
-          <div className="glass space-y-4 p-5">
-            <h2 className="font-display text-xl">Water &amp; solver</h2>
-            <Range
-              label="Surface tension σ"
-              value={sigma}
-              unit="N/m"
-              display={sigma.toFixed(4)}
-              min={0.008}
-              max={0.14}
-              onChange={setSigma}
-              note={
-                sigma < 0.04
-                  ? "soapy — long ripples only"
-                  : sigma > 0.1
-                    ? "stiff skin — fine fast ripples"
-                    : "clean water"
-              }
-            />
-            <Range
-              label="Viscosity ν"
-              value={nuMult}
-              unit="× water"
-              display={nuMult.toFixed(nuMult < 1 ? 2 : 1)}
-              min={-1}
-              max={2}
-              log
-              onChange={setNuMult}
-              note={nuMult > 8 ? "syrupy — ripples die fast" : "ripples ring on"}
-            />
-            <Range
-              label="Nonlinear coupling α"
-              value={nonlinearity}
-              unit=""
-              display={nonlinearity.toFixed(2)}
-              min={0}
-              max={1}
-              onChange={setNonlinearity}
-              note={
-                nonlinearity < 0.05
-                  ? "linear: rings pass straight through each other"
-                  : "crests run faster than troughs, so collisions make new waves"
-              }
-            />
-            <div className="flex flex-wrap gap-2">
-              <Toggle on={reflect} onClick={() => setReflect((v) => !v)}>
-                {reflect ? "tank walls reflect" : "open water"}
-              </Toggle>
-              <Toggle on={breaking} onClick={() => setBreaking((v) => !v)}>
-                {breaking ? "crests may break" : "no breaking"}
-              </Toggle>
-            </div>
-            {stats && (
-              <p className="font-mono text-[11px] text-muted-foreground">
-                {fmt(stats.frameMs, 1)} ms/frame · 336 × 210 cells · {fmt(1 / 0.0022, 0)} steps/s
-              </p>
-            )}
           </div>
         </aside>
       </div>
