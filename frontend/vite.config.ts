@@ -6,10 +6,16 @@
 // You can pass additional config via defineConfig({ vite: { ... }, etc... }) if needed.
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 
+// GitHub Pages serves this repo from a subfolder and cannot run a server, so
+// that build prerenders to static HTML. Lovable's own build is untouched.
+const pagesBase = process.env["GH_PAGES_BASE"];
+
 export default defineConfig({
   tanstackStart: {
     // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
     // nitro/vite builds from this
     server: { entry: "server" },
+    ...(pagesBase ? { prerender: { enabled: true, crawlLinks: true } } : {}),
   },
+  ...(pagesBase ? { vite: { base: pagesBase } } : {}),
 });

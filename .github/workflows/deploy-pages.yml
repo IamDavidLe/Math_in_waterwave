@@ -1,0 +1,65 @@
+# Builds the frontend as a static site and publishes it to GitHub Pages.
+#
+# The app normally renders on a server; Pages only serves files, so this build
+# sets GH_PAGES_BASE, which switches vite.config.ts to prerender / to HTML and
+# rewrite asset URLs for the repo subfolder. Lovable's own deploy is unaffected.
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Let a running deploy finish; queue at most one more.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install --frozen-lockfile
+
+      - run: bun run test
+
+      - run: bun run build
+        env:
+          GH_PAGES_BASE: /${{ github.event.repository.name }}/
+
+      - name: Prepare the artifact
+        run: |
+          # Pages would otherwise run Jekyll over the output.
+          touch .output/public/.nojekyll
+          # Unknown paths fall back to the app, which renders its own 404.
+          cp .output/public/index.html .output/public/404.html
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: frontend/.output/public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
