@@ -1,7 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { ObjectDial } from "@/components/object-dial";
+import { PhysicsGuide } from "@/components/physics-guide";
 import { RipplePool, type PoolStats, type SolverControls } from "@/components/ripple-pool";
 import {
   G,
@@ -71,6 +72,130 @@ const fmt = (x: number, d = 3) =>
 
 const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
 
+type WaveImpact = { x: number; startedAt: number };
+
+function WaveFigure() {
+  const [impact, setImpact] = useState<WaveImpact | null>(null);
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    if (!impact) return;
+    let frame = 0;
+    const animate = () => {
+      const age = (performance.now() - impact.startedAt) / 1000;
+      if (age >= 6) {
+        setImpact(null);
+        setElapsed(0);
+        return;
+      }
+      setElapsed(age);
+      frame = requestAnimationFrame(animate);
+    };
+    frame = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(frame);
+  }, [impact]);
+
+  const wavePath = useMemo(() => {
+    if (!impact) return "M20 132H540";
+    const points: string[] = [];
+    for (let x = 20; x <= 540; x += 4) {
+      const distance = Math.abs(x - impact.x);
+      const arrival = elapsed - distance / 155;
+      const height =
+        arrival > 0
+          ? 52 *
+            Math.exp(-distance / 220) *
+            Math.exp(-arrival * 0.38) *
+            Math.cos(arrival * 10 - distance * 0.115)
+          : 0;
+      points.push(`${x === 20 ? "M" : "L"}${x.toFixed(1)} ${(132 - height).toFixed(1)}`);
+    }
+    return points.join(" ");
+  }, [elapsed, impact]);
+
+  const dropObject = (event: React.MouseEvent<SVGSVGElement>) => {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const x = Math.max(20, Math.min(540, ((event.clientX - bounds.left) / bounds.width) * 560));
+    setElapsed(0);
+    setImpact({ x, startedAt: performance.now() });
+  };
+
+  const isWaving = Boolean(impact);
+  const dropY = impact ? Math.min(108, 18 + elapsed * 240) : 18;
+
+  return (
+    <figure className="wave-figure" aria-labelledby="wave-figure-caption">
+      <div className="wave-figure__topline">
+        <span>Wave equation</span>
+        <span>{isWaving ? `t = ${elapsed.toFixed(2)} s` : "surface at rest"}</span>
+      </div>
+      <svg
+        className="wave-figure__surface"
+        viewBox="0 0 560 260"
+        role="img"
+        aria-label="Interactive water surface. Click to drop an object and create a cosine ripple."
+        onClick={dropObject}
+      >
+        <defs>
+          <linearGradient id="wave-stroke" x1="0" y1="0" x2="1" y2="0">
+            <stop stopColor="var(--primary)" stopOpacity="0.15" />
+            <stop offset="0.5" stopColor="var(--primary)" />
+            <stop offset="1" stopColor="var(--primary)" stopOpacity="0.24" />
+          </linearGradient>
+          <linearGradient id="wave-fill" x1="0" y1="0" x2="0" y2="1">
+            <stop stopColor="var(--primary)" stopOpacity="0.22" />
+            <stop offset="1" stopColor="var(--primary)" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <g className="wave-figure__grid" aria-hidden="true">
+          <path d="M20 48H540M20 104H540M20 160H540M20 216H540" />
+          <path d="M52 24V228M164 24V228M276 24V228M388 24V228M500 24V228" />
+        </g>
+        <path className="wave-figure__baseline" d="M20 132H540" />
+        <path className="wave-figure__fill" d={`${wavePath} L540 228 L20 228Z`} />
+        <path className={`wave-figure__line ${isWaving ? "is-active" : ""}`} d={wavePath} />
+        <g className={`wave-figure__measure ${isWaving ? "is-visible" : ""}`} aria-hidden="true">
+          <path d="M124 132V61M116 61H132M116 132H132M124 222H348M124 214V230M348 214V230" />
+          <text x="139" y="100">
+            A
+          </text>
+          <text x="224" y="247">
+            λ
+          </text>
+        </g>
+        <g className={`wave-figure__phasor ${isWaving ? "is-visible" : ""}`} aria-hidden="true">
+          <circle cx="482" cy="58" r="25" />
+          <path className="wave-figure__phasor-axis" d="M450 58H514M482 26V90" />
+          <g className="wave-figure__phasor-arm">
+            <path d="M482 58L507 58" />
+            <circle cx="507" cy="58" r="3" />
+          </g>
+          <text x="452" y="108">
+            cos ωt
+          </text>
+        </g>
+        {impact && (
+          <g className="wave-figure__drop" aria-hidden="true">
+            <line x1={impact.x} x2={impact.x} y1="20" y2={dropY - 9} />
+            <circle cx={impact.x} cy={dropY} r="7" />
+          </g>
+        )}
+        {!impact && (
+          <text className="wave-figure__prompt" x="280" y="116">
+            click the surface to make a wave
+          </text>
+        )}
+      </svg>
+      <figcaption id="wave-figure-caption">
+        <span className="wave-figure__equation">η(x,t) = A cos(kx − ωt)</span>
+        <span className="wave-figure__legend">
+          <i /> {isWaving ? "cosine ripple" : "click to drop"}
+        </span>
+      </figcaption>
+    </figure>
+  );
+}
+
 function Index() {
   const [radius, setRadius] = useState(0.04);
   const [mass, setMass] = useState(0.18);
@@ -116,16 +241,39 @@ function Index() {
 
   return (
     <main className="mx-auto max-w-7xl px-4 py-8 md:py-12">
-      <header className="mb-8 max-w-3xl">
-        <p className="font-mono text-xs uppercase tracking-[0.3em] text-primary">Ripple Lab</p>
-        <h1 className="mt-2 font-display text-4xl leading-tight font-light md:text-6xl">
-          The mathematics of a <em className="text-primary">splash</em>
-        </h1>
-        <p className="mt-3 text-muted-foreground">
-          Size and weigh an object, then click the water to drop it. The surface is integrated as a
-          nonlinear, dispersive wave field — so ripples outrun each other, collide, break, and throw
-          off new waves of their own.
-        </p>
+      <header className="lab-hero mb-8">
+        <div className="lab-hero__glow" aria-hidden="true" />
+        <div className="relative max-w-5xl">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="flex items-center gap-3 font-mono text-[11px] font-medium uppercase tracking-[0.28em] text-primary">
+              <span className="h-px w-8 bg-primary/75" />
+              Ripple Lab
+            </p>
+            <span className="lab-hero__status">
+              <span className="lab-hero__status-dot" />
+              Interactive wave model
+            </span>
+          </div>
+
+          <div className="mt-7 grid items-center gap-8 md:grid-cols-[minmax(0,0.95fr)_minmax(300px,0.8fr)] md:gap-8 lg:gap-10">
+            <div>
+              <h1 className="max-w-3xl font-display text-5xl leading-[0.94] font-light tracking-[-0.035em] md:text-6xl lg:text-7xl">
+                The mathematics of a <em className="font-normal text-primary">splash</em>
+              </h1>
+              <p className="mt-7 max-w-2xl border-t border-border/80 pt-5 text-base leading-7 text-muted-foreground md:text-lg">
+                Tune an object&apos;s size, mass, and drop height, then send it into the water.
+                Watch a live nonlinear wave field turn impact into ripples, collisions, and breaking
+                crests.
+              </p>
+              <div className="mt-6 flex flex-wrap gap-2 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                <span className="lab-hero__tag">Nonlinear</span>
+                <span className="lab-hero__tag">Dispersive</span>
+                <span className="lab-hero__tag">Real time</span>
+              </div>
+            </div>
+            <WaveFigure />
+          </div>
+        </div>
       </header>
 
       <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
@@ -285,84 +433,7 @@ function Index() {
         </aside>
       </div>
 
-      <section className="mt-8 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        <Eq
-          title="1 · Impact velocity"
-          f="v = √(2gh)"
-          r={`${fmt(im.v)} m/s`}
-          note={`momentum p = mv = ${fmt(im.momentum)} kg·m/s`}
-        />
-        <Eq
-          title="2 · Impact energy"
-          f="E = mgh"
-          r={`${fmt(im.energy)} J`}
-          note={`${WAVE_EFFICIENCY * 100}% of it leaves as waves: ${fmt(im.waveEnergy)} J`}
-        />
-        <Eq
-          title="3 · Cavity radius"
-          f="R = max(r, ½(E/ρg)^¼)"
-          r={`${fmt(im.craterRadius * 100, 2)} cm`}
-          note={`the object cannot punch a hole narrower than itself — ${
-            im.craterRadius > radius * 1.02 ? "energy sets this one" : "its own size sets this one"
-          }`}
-        />
-        <Eq
-          title="4 · Dominant wavelength"
-          f="λ ≈ 2R,  k = 2π/λ"
-          r={`λ = ${fmt(im.wavelength * 100, 2)} cm`}
-          note={`k = ${fmt(im.k, 1)} rad/m · ${im.regime} regime (λ_min = ${fmt(minimumWavelength(water) * 100, 2)} cm)`}
-        />
-        <Eq
-          title="5 · Dispersion relation"
-          f="ω² = gk + σk³/ρ"
-          r={`ω = ${fmt(im.omega, 1)} rad/s`}
-          note={`T = ${fmt(im.period, 3)} s — the k³ term is why short ripples outrun the swell`}
-        />
-        <Eq
-          title="6 · Wave speeds"
-          f="c = ω/k,  c_g = dω/dk"
-          r={`c = ${fmt(im.phaseSpeed)} · c_g = ${fmt(im.groupSpeed)} m/s`}
-          note={`the ring front travels at c_g; no wave can go slower than ${fmt(minimumSpeed(water))} m/s`}
-        />
-        <Eq
-          title="7 · Crest height"
-          f="A = √(2εE / ρg·2πRλ)"
-          r={`${fmt(im.amplitude * 1000, 2)} mm`}
-          note={`energy spread over the first ring; decays as e^(−2νk²t), γ = ${fmt(im.decay, 3)} /s`}
-        />
-        <Eq
-          title="8 · Splash number"
-          f="We = ρv²r/σ"
-          r={`${fmt(im.weber, 0)}`}
-          note={
-            im.droplets > 0
-              ? `inertia beats surface tension — the crown breaks into ~${im.droplets} droplets, and each one starts a new ripple`
-              : "surface tension holds the crown together, so no droplets"
-          }
-        />
-        <Eq
-          title="9 · What floats, bobs"
-          f="ρ_o = m/(⁴⁄₃πr³),  ω_b = √(ρgπr²/m)"
-          r={`ρ_o = ${fmt(im.density, 0)} kg/m³`}
-          note={
-            im.floats
-              ? `lighter than water: it bobs at ${fmt(im.bobOmega / (2 * Math.PI), 2)} Hz and keeps radiating waves`
-              : `${fmt(im.density / RHO_WATER, 1)}× denser than water: it sinks and the surface goes quiet`
-          }
-        />
-        <Eq
-          title="10 · What the solver integrates"
-          f="η_tt = ∇·(c²(η)∇η) − β∇⁴η + ν∇²η_t"
-          r="nonlinear · dispersive · damped"
-          note="β∇⁴η spreads one impact into a ripple train; c²(η) = c²(1 + αη) makes crests outrun troughs, so two rings meeting exchange energy and radiate new ones instead of passing through. Crests too steep to stand break, shedding foam and a fresh ring."
-          wide
-        />
-      </section>
-
-      <footer className="mt-10 text-center font-mono text-xs text-muted-foreground">
-        g = {G} m/s² · ρ_water = {RHO_WATER} kg/m³ · σ_clean = {SIGMA_WATER} N/m · tank 1.6 m across
-        · scaling laws simplified for illustration
-      </footer>
+      <PhysicsGuide object={object} water={water} im={im} />
     </main>
   );
 }

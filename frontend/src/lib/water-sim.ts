@@ -31,14 +31,27 @@ const C2 = 0.22;
 const BETA_MAX = 0.05;
 /** Amplitude-dependent speed gain at `nonlinearity = 1`. */
 const ALPHA_MAX = 0.55;
-/** Crest height at which a wave breaks instead of growing. */
-const BREAK_LIMIT = 0.62;
+/**
+ * Breaking is judged by *steepness*, not height — real water spills when ak
+ * exceeds about 0.44, whatever the wave's absolute size. That is what lets two
+ * modest ripples that merely cross each other break: where their crests
+ * coincide the slopes add, the sum tips over the limit, and the surface sheds
+ * the excess as a new outgoing ring. A height threshold would only ever fire
+ * next to the impact, which is why collisions used to pass by quietly.
+ */
+const STEEP_LIMIT = 0.06; // rise per cell
+/** Hard ceiling on |η|, purely to keep the integrator inside its margin. */
+const CLAMP = 1.03;
 /** Most breaking events handled per step. */
-const MAX_BREAKS = 48;
+const MAX_BREAKS = 64;
+/** Most collision marks kept for the renderer at once. */
+const MAX_MARKS = 120;
+/** Seconds a mark stays on screen. */
+export const MARK_LIFE = 0.7;
 
 // STABILITY: Ω²max = C2·LAP_MAX + BETA_MAX·LAP_MAX² ≈ 1.17 + 1.42 = 2.59 < 4.
-// The nonlinear term can lift c² by α·η, and η is clamped at ±BREAK_LIMIT/0.6,
-// keeping the margin.
+// The nonlinear term can lift c² by α·η, and η is clamped at ±CLAMP, keeping
+// the margin.
 
 export type SimConfig = {
   width: number;
@@ -55,6 +68,8 @@ export type SimConfig = {
   reflect: boolean;
   /** let over-steep crests break into new waves and foam */
   breaking: boolean;
+  /** slope at which a crest spills; lower means collisions break more readily */
+  breakSteepness: number;
 };
 
 export const DEFAULT_CONFIG: SimConfig = {
@@ -66,6 +81,7 @@ export const DEFAULT_CONFIG: SimConfig = {
   nonlinearity: 0.7,
   reflect: true,
   breaking: true,
+  breakSteepness: STEEP_LIMIT,
 };
 
 export type BodyState = "falling" | "floating" | "sinking";
@@ -98,6 +114,21 @@ export type Droplet = {
   r: number;
 };
 
+/**
+ * Somewhere a new wave was just born — either a crest that broke and shed its
+ * excess, or two ripple trains whose crests arrived together and built a peak
+ * neither carried on its own.
+ */
+export type BreakMark = {
+  x: number;
+  y: number;
+  /** sim time of the event */
+  t: number;
+  /** displacement shed (break) or gained over the single-train crest (merge) */
+  strength: number;
+  kind: "break" | "merge";
+};
+
 export type FrameReport = {
   /** bodies that hit the surface during this frame */
   impacts: Body[];
@@ -128,11 +159,15 @@ export class WaterSim {
   private lapPrev: Float32Array;
   /** ∇·(c²(η)∇η) / c², the nonlinear transport operator */
   private flux: Float32Array;
+  /** |∇η|² per cell, the breaking criterion */
+  private steep: Float32Array;
   /** surface foam coverage, 0–1, used by the renderer */
   readonly foam: Float32Array;
 
   readonly bodies: Body[] = [];
   readonly droplets: Droplet[] = [];
+  /** Where crests broke, for the renderer to mark the waves they threw off. */
+  readonly marks: BreakMark[] = [];
 
   /** Worthington jets queued by past impacts: the cavity rebound. */
   private jets: { x: number; y: number; r: number; amp: number; at: number }[] = [];
@@ -150,6 +185,7 @@ export class WaterSim {
     this.lap = new Float32Array(n);
     this.lapPrev = new Float32Array(n);
     this.flux = new Float32Array(n);
+    this.steep = new Float32Array(n);
     this.foam = new Float32Array(n);
     this.metersPerCell = this.cfg.metersAcross / this.w;
     // Pin the sim clock to reality by matching the long-wave speed √C2 (in
@@ -259,6 +295,18 @@ export class WaterSim {
     }
   }
 
+  /** Record a newborn wave, thinning events that cluster on one spot. */
+  private mark(x: number, y: number, strength: number, kind: BreakMark["kind"]) {
+    if (this.marks.length >= MAX_MARKS) return;
+    for (const m of this.marks) {
+      if (m.kind === kind && Math.abs(m.x - x) < 7 && Math.abs(m.y - y) < 7) {
+        if (strength > m.strength) m.strength = strength;
+        return;
+      }
+    }
+    this.marks.push({ x, y, t: this.clock, strength, kind });
+  }
+
   /** Advance the surface by one integration step. Returns breaks seeded. */
   private integrate(): number {
     const { w, h, cur, prev, lap, lapPrev, cfg } = this;
@@ -270,14 +318,15 @@ export class WaterSim {
     // itself. It bites as k², so the two-cell modes die in a fifth of a second
     // while a ten-cell ripple train is untouched for minutes.
     const filter = 0.004 + 0.02 * cfg.viscosity;
+    const limit = Math.max(0.005, cfg.breakSteepness);
+    const limitSq = limit * limit;
     const mu = 0.002 + 0.006 * cfg.viscosity;
-    const clamp = BREAK_LIMIT / 0.6;
 
     // 9-point isotropic stencil — the 5-point one radiates squares. Both
     // operators are built from neighbour *differences*, which keeps them
     // symmetric and therefore energy-conserving: the nonlinear term has to be
     // the flux form ∇·(c²∇η), not c²∇²η, or every reflection feeds the waves.
-    const { flux } = this;
+    const { flux, steep } = this;
     for (let y = 1; y < h - 1; y++) {
       const row = y * w;
       for (let x = 1; x < w - 1; x++) {
@@ -292,6 +341,9 @@ export class WaterSim {
         const d2 = cur[i + w - 1]! - e;
         const d3 = cur[i + w + 1]! - e;
         lap[i]! = (4 * (n0 + n1 + n2 + n3) + (d0 + d1 + d2 + d3)) / 6;
+        const gx = (n1 - n0) * 0.5;
+        const gy = (n3 - n2) * 0.5;
+        steep[i]! = gx * gx + gy * gy;
         if (alpha === 0) {
           flux[i]! = lap[i]!;
           continue;
@@ -333,15 +385,27 @@ export class WaterSim {
           mu * (e - prev[i]!) +
           filter * l;
 
-        if (cfg.breaking && next > BREAK_LIMIT && l < 0 && breaks < MAX_BREAKS) {
-          // Too steep to stand: shed the excess as a new ripple and foam.
-          const excess = next - BREAK_LIMIT;
-          next = BREAK_LIMIT;
-          this.jets.push({ x, y, r: 2.2, amp: -excess * 0.8, at: this.clock });
-          this.addFoam(x, y, 2.5, Math.min(0.8, excess * 2.5));
+        const sq = steep[i]!;
+        if (cfg.breaking && sq > limitSq && next > 0 && l < 0 && breaks < MAX_BREAKS) {
+          // Past the limit the crest spills: take the excess out of the water
+          // here and put it back as an outgoing ring, which is a new wave.
+          const over = Math.sqrt(sq) / limit - 1;
+          const shed = next * Math.min(0.4, 0.25 * over);
+          // Flattening the crest *is* the new wave: a crest that suddenly
+          // loses height is a fresh local disturbance, and it radiates. An
+          // extra injected ring on top of it would add energy rather than
+          // move it, and with a whole steep region breaking at once those
+          // rings would superpose and feed the field.
+          // Lower η at both time levels: dropping only the new one would
+          // leave the crest moving downward faster than it was, which *adds*
+          // kinetic energy — breaking has to take energy out, not put it in.
+          next -= shed;
+          cur[i]! = e - shed;
+          this.addFoam(x, y, 2.6, Math.min(0.7, shed * 6));
           breaks++;
+          if (shed > 0.004) this.mark(x, y, shed, "break");
         }
-        prev[i]! = next > clamp ? clamp : next < -clamp ? -clamp : next;
+        prev[i]! = next > CLAMP ? CLAMP : next < -CLAMP ? -CLAMP : next;
       }
     }
 
@@ -485,6 +549,10 @@ export class WaterSim {
     const splashbacks = this.advanceDroplets(dt);
     const decay = Math.pow(0.965, steps);
     for (let i = 0; i < this.foam.length; i++) this.foam[i]! *= decay;
+    // Marks are only a visual record of where a wave was just born.
+    for (let n = this.marks.length - 1; n >= 0; n--) {
+      if (this.clock - this.marks[n]!.t > MARK_LIFE) this.marks.splice(n, 1);
+    }
     return { impacts, breaks, splashbacks };
   }
 
@@ -494,6 +562,8 @@ export class WaterSim {
     this.lap.fill(0);
     this.lapPrev.fill(0);
     this.flux.fill(0);
+    this.steep.fill(0);
+    this.marks.length = 0;
     this.foam.fill(0);
     this.bodies.length = 0;
     this.droplets.length = 0;

@@ -1,10 +1,25 @@
 import { describe, expect, it } from "vitest";
 
 import { impactOf } from "@/lib/water-physics";
-import { WaterSim } from "@/lib/water-sim";
+import { MARK_LIFE, WaterSim } from "@/lib/water-sim";
 
 const pebble = impactOf({ mass: 0.02, radius: 0.012, dropHeight: 1 });
 const brick = impactOf({ mass: 2.5, radius: 0.09, dropHeight: 2 });
+
+/** Run `fn` with a deterministic Math.random, so splashes repeat exactly. */
+function seeded<T>(fn: () => T): T {
+  const real = Math.random;
+  let seed = 12345;
+  Math.random = () => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed / 0x7fffffff;
+  };
+  try {
+    return fn();
+  } finally {
+    Math.random = real;
+  }
+}
 
 /** A sim with the object already in the water at (nx, ny). */
 function splashed(sim: WaterSim, nx: number, ny: number, impact = pebble) {
@@ -65,6 +80,67 @@ describe("WaterSim", () => {
     let crossings = 0;
     for (let i = 3; i < p.length; i++) if (p[i]! * p[i - 1]! < 0) crossings++;
     expect(crossings).toBeGreaterThan(3);
+  });
+
+  it("never gains energy by breaking — the operator must dissipate, not inject", () => {
+    // Two real bugs hid here: the shed excess was re-emitted as a ring that
+    // carried more energy than the crest lost, and η was lowered at only the
+    // new time level, which leaves the crest falling faster than before and so
+    // *adds* kinetic energy. Both showed up as a surface that fed itself.
+    //
+    // This compares one single step from an identical state, because breaking
+    // is not monotone over a whole run: it takes energy out early, and the
+    // calmer water it leaves then decays more slowly than water that never
+    // broke, which can leave more behind at the end.
+    // Crown droplets are random and stamp craters where they land, so both
+    // runs have to see the same spray.
+    const build = () =>
+      seeded(() => {
+        const sim = new WaterSim({ width: 140, height: 110, breaking: false });
+        sim.drop(0.5, 0.5, brick);
+        for (let i = 0; i < 400 && sim.bodies.some((b) => b.state === "falling"); i++) sim.step(2);
+        for (let i = 0; i < 6; i++) sim.step(2); // steep, young crests
+        return sim;
+      });
+    const withBreak = build();
+    const without = build();
+    expect(withBreak.energy()).toBe(without.energy()); // identical starting point
+
+    withBreak.cfg.breaking = true;
+    const report = withBreak.step(2);
+    without.step(2);
+
+    expect(report.breaks).toBeGreaterThan(0); // the step really did break crests
+    expect(withBreak.energy()).toBeLessThan(without.energy());
+  });
+
+  it("judges breaking by steepness, so gentle swells survive and steep crests do not", () => {
+    const breaksWith = (breakSteepness: number) => {
+      const sim = new WaterSim({ width: 140, height: 110, breakSteepness });
+      let n = 0;
+      sim.drop(0.5, 0.5, brick);
+      for (let i = 0; i < 300; i++) n += sim.step(2).breaks;
+      return n;
+    };
+    // A limit far above any slope the water reaches must never fire.
+    expect(breaksWith(5)).toBe(0);
+    // A limit near zero fires constantly.
+    expect(breaksWith(0.005)).toBeGreaterThan(breaksWith(0.08));
+  });
+
+  it("records where waves were born and forgets them again", () => {
+    const sim = new WaterSim({ width: 140, height: 110 });
+    splashed(sim, 0.5, 0.5, brick);
+    for (let i = 0; i < 40; i++) sim.step(2);
+    expect(sim.marks.length).toBeGreaterThan(0);
+    for (const m of sim.marks) {
+      expect(m.kind).toBe("break");
+      expect(m.strength).toBeGreaterThan(0);
+    }
+    // Marks are a short-lived visual record, not state that accumulates.
+    const quiet = Math.ceil(MARK_LIFE / (sim.dt * 2)) + 400;
+    for (let i = 0; i < quiet; i++) sim.step(2);
+    expect(sim.marks.length).toBe(0);
   });
 
   it("breaks over-steep crests, which seeds new ripples", () => {
