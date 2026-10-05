@@ -52,7 +52,7 @@ $$v = \sqrt{2gh} \qquad E = mgh \qquad \varepsilon \approx 0.05 \text{ of } E \t
 
 **2 · The cavity.** Two limits compete: the hole can be no narrower than the object, and no wider than the energy can pay for, since opening it means lifting water out.
 
-$$R = \max\left(r,\; \tfrac{1}{2}\left(\frac{E}{\rho g}\right)^{1/4}\right)$$
+$$R = \max\left(r, \tfrac{1}{2}\left(\frac{E}{\rho g}\right)^{1/4}\right)$$
 
 **3 · The wave.** The collapsing rim sets the wavelength — one wave spans about the width of the hole that made it.
 
@@ -62,7 +62,7 @@ $$\lambda \approx 2R \qquad k = \frac{2\pi}{\lambda}$$
 
 $$\omega^2 = gk + \frac{\sigma k^3}{\rho} \qquad c = \frac{\omega}{k} \qquad c_g = \frac{\mathrm{d}\omega}{\mathrm{d}k}$$
 
-**5 · How tall, how long.** The wave energy spreads over the first ring; viscosity then drains it at a rate climbing with $k^2$, so fine chop dies in moments and the long swell rolls on.
+**5 · How tall, how long.** The wave energy spreads over the first ring; viscosity then drains it at a rate that climbs with the square of the wavenumber — so fine chop dies in moments while the long swell rolls on.
 
 $$A = \sqrt{\frac{2\varepsilon E}{\rho g \cdot 2\pi R\lambda}} \qquad \gamma = 2\nu k^2$$
 
@@ -74,7 +74,7 @@ $$We = \frac{\rho v^2 r}{\sigma} \qquad \rho_o = \frac{m}{\tfrac{4}{3}\pi r^3}$$
 
 The relations above are closed-form estimates for a single ripple. The surface on screen is integrated from one equation for the height $\eta$:
 
-$$\eta_{tt} = \nabla\cdot\left(c^2(\eta)\,\nabla\eta\right) - \beta\nabla^4\eta + \nu\nabla^2\eta_t$$
+$$\eta_{tt} = \nabla\cdot\left(c^2(\eta)\nabla\eta\right) - \beta\nabla^4\eta + \nu\nabla^2\eta_t$$
 
 Each term buys one behaviour you can see:
 
