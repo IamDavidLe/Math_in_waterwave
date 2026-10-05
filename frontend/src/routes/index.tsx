@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { IntroSplash } from "@/components/intro-splash";
 import { ObjectDial } from "@/components/object-dial";
+import { PhysicsGuide } from "@/components/physics-guide";
 import { DEFAULT_LOOK, MATERIAL_LOOKS, OBJECT_LOOKS, lookByName } from "@/lib/object-looks";
 import {
   RipplePool,
@@ -443,6 +444,8 @@ function Index() {
             </div>
           </aside>
         </div>
+
+        <PhysicsGuide object={object} water={water} im={im} />
       </main>
     </>
   );
