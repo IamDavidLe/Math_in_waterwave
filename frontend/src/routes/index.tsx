@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 
 import { IntroSplash } from "@/components/intro-splash";
+import { Landing } from "@/components/landing";
 import { ObjectDial } from "@/components/object-dial";
 import { PhysicsGuide } from "@/components/physics-guide";
 import { DEFAULT_LOOK, MATERIAL_LOOKS, OBJECT_LOOKS, lookByName } from "@/lib/object-looks";
@@ -262,7 +263,8 @@ function Index() {
   return (
     <>
       <IntroSplash />
-      <main className="mx-auto max-w-7xl px-4 py-8 md:py-12">
+      <Landing />
+      <main id="lab" className="mx-auto max-w-7xl px-4 py-8 md:py-12">
         <header className="lab-hero mb-8">
           <div className="lab-hero__glow" aria-hidden="true" />
           <div className="relative max-w-5xl">
