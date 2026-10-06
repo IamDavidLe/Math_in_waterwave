@@ -1,3 +1,4 @@
+import { Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 
 import { MATERIAL_LOOKS, drawObject } from "@/lib/object-looks";
@@ -13,19 +14,25 @@ const LOOK = MATERIAL_LOOKS["Steel"]!;
 const OBJECT = { mass: 1.4, radius: 0.05, dropHeight: 2.2 };
 
 /**
- * The landing animation: a steel ball falls into dark water, and the ripple it
- * throws off opens out into the page. It is the product's own solver doing it —
- * not a canned clip — so the first thing anyone sees is the real thing.
+ * The opening animation: a steel ball falls into dark water, and the ripple it
+ * throws off opens out into the page that follows. It is the product's own
+ * solver doing it — not a canned clip — so the first thing anyone sees is the
+ * real thing.
  *
- * It can be skipped with a click or any key, it never blocks the page beneath
- * for more than two seconds, and anyone who has asked their system for less
- * motion never sees it at all.
+ * This is the whole of the entry page. When the splash is over — on its own, or
+ * because it was skipped with a click or any key — it calls `onDone`, and the
+ * page sends the visitor on to the investigation. Anyone who has asked their
+ * system for less motion is sent on straight away, without seeing it.
  */
-export function IntroSplash() {
+export function IntroSplash({ onDone }: { onDone: () => void }) {
   const [leaving, setLeaving] = useState(false);
-  const [gone, setGone] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const done = useRef(false);
+
+  // onDone is read through a ref so the animation effect never restarts when the
+  // parent hands down a fresh callback.
+  const finish = useRef(onDone);
+  finish.current = onDone;
 
   // One exit, however it is triggered.
   const dismiss = useRef(() => {});
@@ -33,13 +40,13 @@ export function IntroSplash() {
     if (done.current) return;
     done.current = true;
     setLeaving(true);
-    window.setTimeout(() => setGone(true), FADE_MS);
+    window.setTimeout(() => finish.current(), FADE_MS);
   };
 
   useEffect(() => {
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       done.current = true;
-      setGone(true);
+      finish.current();
       return;
     }
 
@@ -189,43 +196,37 @@ export function IntroSplash() {
     };
   }, []);
 
-  if (gone) return null;
-
   return (
-    <>
-      {/* The cover is cleared by script. Without script it would sit over the
-          page forever, so hide it outright in that case. */}
-      <noscript>
-        <style>{`.intro-cover{display:none!important}`}</style>
-      </noscript>
+    <div
+      className="fixed inset-0 overflow-hidden bg-[#06111a]"
+      style={{
+        opacity: leaving ? 0 : 1,
+        // The ripple opens outward as it clears, so the next page arrives through it.
+        transform: leaving ? "scale(1.06)" : "scale(1)",
+        transition: `opacity ${FADE_MS}ms ease-out, transform ${FADE_MS}ms ease-out`,
+      }}
+    >
+      <canvas ref={canvasRef} aria-hidden="true" className="h-full w-full object-cover" />
       <div
-        aria-hidden="true"
-        className="intro-cover fixed inset-0 z-50 overflow-hidden bg-[#06111a]"
+        className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-4 text-center"
         style={{
           opacity: leaving ? 0 : 1,
-          // The ripple opens outward as it clears, so the page arrives through it.
-          transform: leaving ? "scale(1.06)" : "scale(1)",
-          transition: `opacity ${FADE_MS}ms ease-out, transform ${FADE_MS}ms ease-out`,
-          pointerEvents: leaving ? "none" : "auto",
+          transition: `opacity ${FADE_MS / 2}ms ease-out`,
         }}
       >
-        <canvas ref={canvasRef} className="h-full w-full object-cover" />
-        <div
-          className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 text-center"
-          style={{
-            opacity: leaving ? 0 : 1,
-            transition: `opacity ${FADE_MS / 2}ms ease-out`,
-          }}
+        <p className="font-mono text-xs uppercase tracking-[0.4em] text-primary">Ripple Lab</p>
+        <h1 className="font-display text-4xl font-light text-foreground md:text-6xl">
+          The mathematics of a <em className="text-primary">splash</em>
+        </h1>
+        {/* A real link, so the splash is never a dead end: it carries anyone
+            without script through, and it is what the static build crawls. */}
+        <Link
+          to="/landing"
+          className="mt-6 font-mono text-[11px] uppercase tracking-[0.25em] text-muted-foreground transition-colors hover:text-primary"
         >
-          <p className="font-mono text-xs uppercase tracking-[0.4em] text-primary">Ripple Lab</p>
-          <h1 className="font-display text-4xl font-light text-foreground md:text-6xl">
-            The mathematics of a <em className="text-primary">splash</em>
-          </h1>
-          <p className="mt-6 font-mono text-[11px] uppercase tracking-[0.25em] text-muted-foreground">
-            click to skip
-          </p>
-        </div>
+          click to skip →
+        </Link>
       </div>
-    </>
+    </div>
   );
 }

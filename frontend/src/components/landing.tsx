@@ -1,8 +1,11 @@
-import type { ReactNode } from "react";
+import { Link } from "@tanstack/react-router";
+import { useState, type ReactNode } from "react";
+
+import { WaveFigure } from "@/components/wave-figure";
 
 /**
  * The landing page: why this investigation exists, and the mathematics behind
- * what it shows. The lab itself sits below it.
+ * what it shows. The lab is its own page, reached from the links here.
  *
  * Colour in the diagrams does one job. Each figure plots a single thing, so it
  * wears the site's own wave colour and nothing else needs a legend; axes and
@@ -243,9 +246,47 @@ function Spreading() {
   );
 }
 
+/* ── the opening demo · a slice of water to drop something into ───────────── */
+function WaveDemo() {
+  const [open, setOpen] = useState(false);
+
+  if (!open) {
+    return (
+      <p>
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="inline-flex items-center gap-2 rounded-full border border-primary/40 px-5 py-2 font-mono text-xs uppercase tracking-[0.2em] text-primary transition-colors hover:bg-primary/10"
+        >
+          Drop something in ↓
+        </button>
+      </p>
+    );
+  }
+
+  return (
+    <div className="page-enter mt-5">
+      <WaveFigure />
+      <p className="mt-4 text-sm">
+        That is one slice, one object, one wavelength. The lab does the whole surface — any object
+        you like, with every quantity in the formulas worked out as it goes.
+      </p>
+      <p className="mt-4">
+        <Link
+          to="/lab"
+          viewTransition
+          className="inline-flex items-center gap-2 rounded-full border border-primary/40 px-5 py-2 font-mono text-xs uppercase tracking-[0.2em] text-primary transition-colors hover:bg-primary/10"
+        >
+          Open the lab →
+        </Link>
+      </p>
+    </div>
+  );
+}
+
 export function Landing() {
   return (
-    <div className="mx-auto max-w-5xl px-4 pt-10 pb-6 md:pt-16">
+    <div className="page-enter mx-auto max-w-5xl px-4 pt-10 pb-16 md:pt-16">
       <header className="mx-auto max-w-3xl text-center">
         <p className="font-mono text-xs uppercase tracking-[0.35em] text-primary">
           A ripple investigation
@@ -255,7 +296,7 @@ export function Landing() {
         </h1>
         <p className="mt-5 text-lg leading-relaxed text-muted-foreground">
           I grew up near water, and I have wondered about this since I was small. This page is my
-          answer — and below it, a lake you can throw things into yourself.
+          answer — and in the lab, a lake you can throw things into yourself.
         </p>
       </header>
 
@@ -308,18 +349,10 @@ export function Landing() {
           </p>
           <RingsAndCosine />
           <p>
-            A still picture can only show one instant, so I built the moving version. Everything
-            below this page is a working simulation of this surface: choose an object, drop it in,
-            and watch the pattern it writes.
+            A still picture can only show one instant, so here is a slice of water you can actually
+            disturb. Drop something in and watch the cosine appear, travel, and die away.
           </p>
-          <p>
-            <a
-              href="#lab"
-              className="inline-flex items-center gap-2 rounded-full border border-primary/40 px-5 py-2 font-mono text-xs uppercase tracking-[0.2em] text-primary transition-colors hover:bg-primary/10"
-            >
-              Drop something in ↓
-            </a>
-          </p>
+          <WaveDemo />
         </Part>
 
         <Part
@@ -457,23 +490,24 @@ export function Landing() {
 
         <Part label="Section 2 · The point" title="Measure it yourself">
           <p>
-            None of this is something you have to take my word for. In the simulation below, every
-            quantity in these formulas is computed for whatever you drop and shown with the
-            arithmetic written out, so you can check it by hand. Change the size and watch <V>λ</V>{" "}
-            move. Change the weight and watch the crest height move. Drop two things at once and
-            look for the hyperbolas.
+            None of this is something you have to take my word for. In the lab, every quantity in
+            these formulas is computed for whatever you drop and shown with the arithmetic written
+            out, so you can check it by hand. Change the size and watch <V>λ</V> move. Change the
+            weight and watch the crest height move. Drop two things at once and look for the
+            hyperbolas.
           </p>
           <p>
             The thing I find satisfying is that the question I had as a kid — why is every splash
             different? — has an answer that is only a few lines long, and I can now watch it happen.
           </p>
           <p>
-            <a
-              href="#lab"
+            <Link
+              to="/lab"
+              viewTransition
               className="inline-flex items-center gap-2 rounded-full border border-primary/40 px-5 py-2 font-mono text-xs uppercase tracking-[0.2em] text-primary transition-colors hover:bg-primary/10"
             >
-              Open the lab ↓
-            </a>
+              Open the lab →
+            </Link>
           </p>
         </Part>
       </div>
