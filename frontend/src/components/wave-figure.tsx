@@ -2,6 +2,20 @@ import { useEffect, useMemo, useState } from "react";
 
 type WaveImpact = { x: number; startedAt: number };
 
+/* The cosine, in viewBox units. The drawing and the A and λ marks that label it
+   both come from these, so the brackets measure what is actually on screen. */
+const BASE = 132;
+/** Crest height A. */
+const AMP = 40;
+/** Wavelength λ — crest to crest. Gentle enough that the curve reads as water. */
+const LAMBDA = 96;
+const K = (2 * Math.PI) / LAMBDA;
+const OMEGA = 10;
+/** How fast the leading edge travels. Close to ω/k, so crests ride with it. */
+const FRONT = 155;
+/** Where the A and λ brackets sit. */
+const MARK_X = 124;
+
 /**
  * A single slice of water, at rest until it is clicked. Dropping something in
  * sends out η = A cos(kx − ωt) and labels the two things the formula names: the
@@ -34,20 +48,30 @@ export function WaveFigure() {
   }, [impact]);
 
   const wavePath = useMemo(() => {
-    if (!impact) return "M20 132H540";
+    if (!impact) return `M20 ${BASE}H540`;
     const waveAge = Math.max(0, elapsed - dropDuration);
     const points: string[] = [];
-    for (let x = 20; x <= 540; x += 4) {
+    // One sample per unit of the viewBox. The figure is drawn several times
+    // wider than its 560-unit box, so a coarser step turns every crest into a
+    // visible corner.
+    for (let x = 20; x <= 540; x += 1) {
       const distance = Math.abs(x - impact.x);
-      const arrival = waveAge - distance / 155;
-      const height =
-        arrival > 0
-          ? 52 *
-            Math.exp(-distance / 220) *
-            Math.exp(-arrival * 0.38) *
-            Math.cos(arrival * 10 - distance * 0.115)
-          : 0;
-      points.push(`${x === 20 ? "M" : "L"}${x.toFixed(1)} ${(132 - height).toFixed(1)}`);
+      const arrival = waveAge - distance / FRONT;
+      let height = 0;
+      if (arrival > 0) {
+        // The front eases in over its first half-period instead of snapping up
+        // to full height the instant it arrives, which left a step at the
+        // leading edge.
+        const t = Math.min(1, arrival / 0.32);
+        const onset = t * t * (3 - 2 * t);
+        height =
+          AMP *
+          onset *
+          Math.exp(-distance / 220) *
+          Math.exp(-arrival * 0.38) *
+          Math.cos(arrival * OMEGA - distance * K);
+      }
+      points.push(`${x === 20 ? "M" : "L"}${x} ${(BASE - height).toFixed(2)}`);
     }
     return points.join(" ");
   }, [dropDuration, elapsed, impact]);
@@ -101,11 +125,17 @@ export function WaveFigure() {
         <path className="wave-figure__fill" d={`${wavePath} L540 228 L20 228Z`} />
         <path className={`wave-figure__line ${isWaving ? "is-active" : ""}`} d={wavePath} />
         <g className={`wave-figure__measure ${isWaving ? "is-visible" : ""}`} aria-hidden="true">
-          <path d="M124 132V61M116 61H132M116 132H132M124 222H348M124 214V230M348 214V230" />
-          <text x="139" y="100">
+          <path
+            d={
+              `M${MARK_X} ${BASE}V${BASE - AMP}M${MARK_X - 8} ${BASE - AMP}H${MARK_X + 8}` +
+              `M${MARK_X - 8} ${BASE}H${MARK_X + 8}` +
+              `M${MARK_X} 222H${MARK_X + LAMBDA}M${MARK_X} 214V230M${MARK_X + LAMBDA} 214V230`
+            }
+          />
+          <text x={MARK_X + 15} y={BASE - AMP / 2 + 4}>
             A
           </text>
-          <text x="224" y="247">
+          <text x={MARK_X + LAMBDA / 2} y="247" textAnchor="middle">
             λ
           </text>
         </g>

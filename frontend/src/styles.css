@@ -163,7 +163,7 @@ input[type="range"] { accent-color: var(--primary); width: 100%; }
 .wave-figure__surface { cursor: crosshair; }
 .wave-figure__grid path { stroke: oklch(0.82 0.12 195 / 0.09); stroke-width: 1; }
 .wave-figure__baseline { stroke: oklch(0.82 0.12 195 / 0.36); stroke-width: 1; stroke-dasharray: 3 5; }
-.wave-figure__line { fill: none; stroke: oklch(0.68 0.08 195 / 0.66); stroke-width: 2; stroke-linecap: round; transition: stroke 180ms ease, stroke-width 180ms ease; }
+.wave-figure__line { fill: none; stroke: oklch(0.68 0.08 195 / 0.66); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; transition: stroke 180ms ease, stroke-width 180ms ease; }
 .wave-figure__line.is-active { stroke: url(#wave-stroke); stroke-width: 3; }
 .wave-figure__fill { fill: url(#wave-fill); }
 .wave-figure__measure,
