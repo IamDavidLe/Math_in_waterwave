@@ -2,6 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { useState, type ReactNode } from "react";
 
 import { WaveFigure } from "@/components/wave-figure";
+import { useReveal, type RevealVariant } from "@/hooks/use-reveal";
 
 /**
  * The landing page: why this investigation exists, and the mathematics behind
@@ -19,6 +20,11 @@ const INK = "oklch(0.68 0.04 215)";
 const FAINT = "oklch(0.85 0.05 210 / 0.18)";
 const NODE = "var(--accent)";
 
+/**
+ * A diagram that draws itself the first time it is scrolled to. The marks inside
+ * opt in with `fig-draw`, `fig-ring` or `fig-fade`; the reveal here is what
+ * starts them.
+ */
 function Figure({
   caption,
   children,
@@ -28,8 +34,9 @@ function Figure({
   children: ReactNode;
   viewBox: string;
 }) {
+  const reveal = useReveal<HTMLElement>("scale");
   return (
-    <figure className="mt-5">
+    <figure ref={reveal.ref} data-reveal={reveal.variant} className={`mt-5 ${reveal.className}`}>
       <svg
         viewBox={viewBox}
         className="mx-auto block w-full max-w-xl"
@@ -45,9 +52,25 @@ function Figure({
   );
 }
 
-function Part({ label, title, children }: { label: string; title: string; children: ReactNode }) {
+function Part({
+  label,
+  title,
+  anim,
+  children,
+}: {
+  label: string;
+  title: string;
+  /** How this section arrives. Each one on the page is given a different one. */
+  anim: RevealVariant;
+  children: ReactNode;
+}) {
+  const reveal = useReveal<HTMLElement>(anim);
   return (
-    <section className="glass p-6 md:p-8">
+    <section
+      ref={reveal.ref}
+      data-reveal={reveal.variant}
+      className={`glass p-6 md:p-8 ${reveal.className}`}
+    >
       <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
         {label}
       </p>
@@ -93,16 +116,25 @@ function RingsAndCosine() {
       {radii.map((r, i) => (
         <circle
           key={r}
+          className="fig-ring"
           cx={cx}
           cy={cy}
           r={r}
           fill="none"
           stroke={WAVE}
           strokeWidth={1.8}
-          opacity={0.9 - i * 0.16}
+          // The ring opens from the impact, not the middle of the box, and each
+          // one leaves a little after the one inside it.
+          style={
+            {
+              "--ring-o": 0.9 - i * 0.16,
+              transformOrigin: `${cx}px ${cy}px`,
+              animationDelay: `${i * 130}ms`,
+            } as React.CSSProperties
+          }
         />
       ))}
-      <circle cx={cx} cy={cy} r={3} fill={INK} />
+      <circle className="fig-fade" cx={cx} cy={cy} r={3} fill={INK} />
       <line x1={cx} y1={cy} x2={212} y2={cy} stroke={INK} strokeWidth={1} strokeDasharray="4 4" />
       <text
         x={cx}
@@ -117,7 +149,15 @@ function RingsAndCosine() {
 
       <line x1={x0} y1={105} x2={x0 + span} y2={105} stroke={FAINT} strokeWidth={1} />
       <line x1={x0} y1={60} x2={x0} y2={150} stroke={FAINT} strokeWidth={1} />
-      <path d={pts.join(" ")} fill="none" stroke={WAVE} strokeWidth={2} />
+      <path
+        className="fig-draw"
+        pathLength={1}
+        d={pts.join(" ")}
+        fill="none"
+        stroke={WAVE}
+        strokeWidth={2}
+        style={{ animationDelay: "560ms" }}
+      />
       <text x={x0 - 14} y={64} fill={INK} fontSize={9} fontFamily="ui-monospace, monospace">
         η
       </text>
@@ -171,40 +211,62 @@ function Interference() {
       viewBox={`0 -26 ${W} ${H + 26}`}
       caption="Two stones, two sets of rings. Along the amber curves the two waves always arrive half a wavelength apart and cancel — and those curves are hyperbolas, with the two impact points as their foci."
     >
-      {[-a, a].map((dx) =>
+      {/* One stone, then the other, each ring after the last — so the cancelling
+          curves have something to be the answer to by the time they draw. */}
+      {[-a, a].map((dx, side) =>
         [1, 2, 3, 4, 5, 6, 7].map((n) => (
           <circle
             key={`${dx}-${n}`}
+            className="fig-ring"
             cx={cx + dx}
             cy={cy}
             r={n * lam}
             fill="none"
             stroke={WAVE}
             strokeWidth={1}
-            opacity={0.3}
+            style={
+              {
+                "--ring-o": 0.3,
+                transformOrigin: `${cx + dx}px ${cy}px`,
+                animationDelay: `${side * 260 + n * 70}ms`,
+              } as React.CSSProperties
+            }
           />
         )),
       )}
-      {[0.5, 1.5, 2.5].map((n) => (
+      {[0.5, 1.5, 2.5].map((n, i) => (
         <path
           key={n}
+          className="fig-draw"
+          pathLength={1}
           d={hyperbola(n * lam * 0.5)}
           fill="none"
           stroke={NODE}
           strokeWidth={1.8}
           opacity={0.9}
+          style={{ animationDelay: `${1000 + i * 180}ms` }}
         />
       ))}
-      {[-a, a].map((dx) => (
-        <circle key={dx} cx={cx + dx} cy={cy} r={4} fill={INK} />
+      {[-a, a].map((dx, side) => (
+        <circle
+          key={dx}
+          className="fig-fade"
+          cx={cx + dx}
+          cy={cy}
+          r={4}
+          fill={INK}
+          style={{ animationDelay: `${side * 260}ms` }}
+        />
       ))}
       <text
+        className="fig-fade"
         x={cx}
         y={-12}
         fill={NODE}
         fontSize={10}
         textAnchor="middle"
         fontFamily="ui-monospace, monospace"
+        style={{ animationDelay: "1400ms" }}
       >
         where they cancel
       </text>
@@ -232,14 +294,54 @@ function Spreading() {
       viewBox="0 0 300 130"
       caption="The same energy, spread around an ever longer circle. The dashed envelope is 1/√r — the ring does not lose energy, it only has further to share it."
     >
-      <line x1={0} y1={70} x2={300} y2={70} stroke={FAINT} strokeWidth={1} />
-      <path d={up.join(" ")} fill="none" stroke={NODE} strokeWidth={1.3} strokeDasharray="5 4" />
-      <path d={dn.join(" ")} fill="none" stroke={NODE} strokeWidth={1.3} strokeDasharray="5 4" />
-      <path d={pts.join(" ")} fill="none" stroke={WAVE} strokeWidth={2} />
-      <text x={238} y={30} fill={NODE} fontSize={9} fontFamily="ui-monospace, monospace">
+      <line className="fig-fade" x1={0} y1={70} x2={300} y2={70} stroke={FAINT} strokeWidth={1} />
+      {/* The envelope is already dashed, so it cannot also be drawn on by a dash
+          offset — it arrives first instead, and the wave fills it in. */}
+      <path
+        className="fig-fade"
+        d={up.join(" ")}
+        fill="none"
+        stroke={NODE}
+        strokeWidth={1.3}
+        strokeDasharray="5 4"
+      />
+      <path
+        className="fig-fade"
+        d={dn.join(" ")}
+        fill="none"
+        stroke={NODE}
+        strokeWidth={1.3}
+        strokeDasharray="5 4"
+      />
+      <path
+        className="fig-draw"
+        pathLength={1}
+        d={pts.join(" ")}
+        fill="none"
+        stroke={WAVE}
+        strokeWidth={2}
+        style={{ animationDelay: "320ms" }}
+      />
+      <text
+        className="fig-fade"
+        x={238}
+        y={30}
+        fill={NODE}
+        fontSize={9}
+        fontFamily="ui-monospace, monospace"
+        style={{ animationDelay: "900ms" }}
+      >
         A ∝ 1/√r
       </text>
-      <text x={286} y={112} fill={INK} fontSize={9} fontFamily="ui-monospace, monospace">
+      <text
+        className="fig-fade"
+        x={286}
+        y={112}
+        fill={INK}
+        fontSize={9}
+        fontFamily="ui-monospace, monospace"
+        style={{ animationDelay: "900ms" }}
+      >
         r
       </text>
     </Figure>
@@ -287,7 +389,7 @@ function WaveDemo() {
 export function Landing() {
   return (
     <div className="page-enter mx-auto max-w-5xl px-4 pt-10 pb-16 md:pt-16">
-      <header className="mx-auto max-w-3xl text-center">
+      <header className="lede mx-auto max-w-3xl text-center">
         <p className="font-mono text-xs uppercase tracking-[0.35em] text-primary">
           A ripple investigation
         </p>
@@ -312,7 +414,11 @@ export function Landing() {
       </header>
 
       <div className="mt-10 space-y-5">
-        <Part label="Section 1 · What I observed" title="Every object wrote a different pattern">
+        <Part
+          label="Section 1 · What I observed"
+          title="Every object wrote a different pattern"
+          anim="rise"
+        >
           <p>
             When I was a kid I used to spend hours playing with water, or just walking around the
             lake. That is when I started noticing the ripples — every single time something touched
@@ -332,6 +438,7 @@ export function Landing() {
 
         <Part
           label="Section 1 · Why it caught my attention"
+          anim="left"
           title="It looked like my maths homework"
         >
           <p>
@@ -353,7 +460,11 @@ export function Landing() {
           <p>I am still curious about it. This whole page is me chasing that question down.</p>
         </Part>
 
-        <Part label="Section 1 · A visual" title="What I see, in one picture — and then in motion">
+        <Part
+          label="Section 1 · A visual"
+          anim="scale"
+          title="What I see, in one picture — and then in motion"
+        >
           <p>
             Here is the thing I noticed, drawn twice: once from above the way you see it on a lake,
             and once as a slice through the middle, which is where the cosine appears.
@@ -368,6 +479,7 @@ export function Landing() {
 
         <Part
           label="Section 2 · Explain the mathematics"
+          anim="expand"
           title="1 · The symmetry: direction does not matter, only distance"
         >
           <p>
@@ -390,7 +502,7 @@ export function Landing() {
           </p>
         </Part>
 
-        <Part label="Section 2" title="2 · The curve itself is a cosine">
+        <Part label="Section 2" title="2 · The curve itself is a cosine" anim="settle">
           <p>Take that slice and the shape is exactly the function I recognised:</p>
           <Eq>
             η = <V>A</V> cos(<V>kr</V> − <V>ωt</V>)
@@ -405,7 +517,7 @@ export function Landing() {
           </p>
         </Part>
 
-        <Part label="Section 2" title="3 · Travelling outward is a translation">
+        <Part label="Section 2" title="3 · Travelling outward is a translation" anim="slide">
           <p>Why does the pattern move? Factor the inside of the cosine:</p>
           <Eq>
             <V>kr</V> − <V>ωt</V> = <V>k</V>(<V>r</V> − <V>ct</V>), &nbsp; where <V>c</V> = <V>ω</V>
@@ -420,7 +532,11 @@ export function Landing() {
           </p>
         </Part>
 
-        <Part label="Section 2" title="4 · Why the rings flatten: a proportion argument">
+        <Part
+          label="Section 2"
+          title="4 · Why the rings flatten: a proportion argument"
+          anim="flatten"
+        >
           <p>
             The rings get lower as they widen, and that is not friction — it is geometry. The energy
             the stone gave the water is spread around the ring, and a ring of radius <V>r</V> has
@@ -440,7 +556,7 @@ export function Landing() {
           <Spreading />
         </Part>
 
-        <Part label="Section 2" title="5 · Why the object's size changes the pattern">
+        <Part label="Section 2" title="5 · Why the object's size changes the pattern" anim="right">
           <p>
             This is the part I was most curious about as a kid. The object sets the size of the hole
             it punches, the hole sets the wavelength, and the wavelength sets everything else. The
@@ -473,6 +589,7 @@ export function Landing() {
         <Part
           label="Section 2"
           title="6 · When two sets of rings cross, the maths draws a hyperbola"
+          anim="sharpen"
         >
           <p>
             Throw two stones and the surface does something lovelier still. At any point the two
@@ -499,7 +616,7 @@ export function Landing() {
           <Interference />
         </Part>
 
-        <Part label="Section 2 · The point" title="Measure it yourself">
+        <Part label="Section 2 · The point" title="Measure it yourself" anim="rise">
           <p>
             None of this is something you have to take my word for. In the lab, every quantity in
             these formulas is computed for whatever you drop and shown with the arithmetic written

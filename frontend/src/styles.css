@@ -212,3 +212,81 @@ input[type="range"] { accent-color: var(--primary); width: 100%; }
   ::view-transition-old(root),
   ::view-transition-new(root) { animation: none; opacity: 1; }
 }
+
+/* ── landing reveals ──────────────────────────────────────────────────────────
+   Each section of the investigation arrives in its own way, chosen to suit what
+   it is saying. Nothing is hidden until the script has armed it, so without
+   script the page simply reads as a page. */
+.reveal.is-armed { opacity: 0; }
+
+.reveal.is-in {
+  animation-duration: 760ms;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  animation-fill-mode: both;
+}
+
+.reveal.is-in[data-reveal="rise"]    { animation-name: reveal-rise; }
+.reveal.is-in[data-reveal="left"]    { animation-name: reveal-left; }
+.reveal.is-in[data-reveal="right"]   { animation-name: reveal-right; }
+.reveal.is-in[data-reveal="scale"]   { animation-name: reveal-scale; }
+.reveal.is-in[data-reveal="expand"]  { animation-name: reveal-expand; }
+.reveal.is-in[data-reveal="slide"]   { animation-name: reveal-slide; animation-duration: 900ms; }
+.reveal.is-in[data-reveal="flatten"] { animation-name: reveal-flatten; }
+.reveal.is-in[data-reveal="sharpen"] { animation-name: reveal-sharpen; animation-duration: 900ms; }
+.reveal.is-in[data-reveal="settle"]  { animation-name: reveal-settle; }
+
+@keyframes reveal-rise    { from { opacity: 0; transform: translateY(30px); }            to { opacity: 1; transform: none; } }
+@keyframes reveal-left    { from { opacity: 0; transform: translateX(-36px); }           to { opacity: 1; transform: none; } }
+@keyframes reveal-right   { from { opacity: 0; transform: translateX(36px); }            to { opacity: 1; transform: none; } }
+@keyframes reveal-scale   { from { opacity: 0; transform: scale(0.93); }                 to { opacity: 1; transform: none; } }
+/* Opens outward from its own middle, the way a ring does. */
+@keyframes reveal-expand  { from { opacity: 0; transform: scale(0.84); }                 to { opacity: 1; transform: none; } }
+/* A translation, which is what the section is about. */
+@keyframes reveal-slide   { from { opacity: 0; transform: translateX(-72px); }           to { opacity: 1; transform: none; } }
+/* Stands tall, then flattens — the 1/√r argument, in one move. */
+@keyframes reveal-flatten { from { opacity: 0; transform: scaleY(1.22); }                to { opacity: 1; transform: none; } }
+@keyframes reveal-sharpen { from { opacity: 0; filter: blur(12px); }                     to { opacity: 1; filter: none; } }
+@keyframes reveal-settle  { from { opacity: 0; transform: translateY(-26px) scale(0.98); } to { opacity: 1; transform: none; } }
+
+.reveal.is-in[data-reveal="flatten"] { transform-origin: bottom center; }
+
+/* ── figures draw themselves in ───────────────────────────────────────────────
+   A drawn line arriving along its own length reads as the figure being made
+   rather than pasted in. pathLength="1" normalises every path, so one keyframe
+   covers them all however long they really are. */
+.fig-draw { stroke-dasharray: 1; stroke-dashoffset: 1; }
+.reveal.is-in .fig-draw { animation: fig-draw 1100ms cubic-bezier(0.33, 1, 0.68, 1) forwards; }
+@keyframes fig-draw { to { stroke-dashoffset: 0; } }
+
+/* Rings open outward from the impact that made them. Each sets its own origin,
+   since the impact is not the middle of the box. */
+.fig-ring { opacity: 0; transform-box: view-box; }
+.reveal.is-in .fig-ring { animation: fig-ring 900ms cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+@keyframes fig-ring { from { opacity: 0; transform: scale(0.1); } to { opacity: var(--ring-o, 1); transform: none; } }
+
+.fig-fade { opacity: 0; }
+.reveal.is-in .fig-fade { animation: fig-fade 700ms ease-out forwards; }
+@keyframes fig-fade { to { opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal.is-armed { opacity: 1; }
+  .reveal.is-in { animation: none; }
+  .fig-draw { stroke-dasharray: none; stroke-dashoffset: 0; }
+  .fig-ring { opacity: var(--ring-o, 1); transform: none; }
+  .fig-fade { opacity: 1; }
+  .reveal.is-in .fig-draw,
+  .reveal.is-in .fig-ring,
+  .reveal.is-in .fig-fade { animation: none; }
+}
+
+/* The opening of the investigation arrives a line at a time. It is above the
+   fold, so it runs on load rather than waiting to be scrolled to. */
+.lede > * { animation: reveal-rise 700ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.lede > *:nth-child(1) { animation-delay: 80ms; }
+.lede > *:nth-child(2) { animation-delay: 200ms; }
+.lede > *:nth-child(3) { animation-delay: 330ms; }
+.lede > *:nth-child(4) { animation-delay: 460ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  .lede > * { animation: none; }
+}
