@@ -298,6 +298,17 @@ export function Landing() {
           I grew up near water, and I have wondered about this since I was small. This page is my
           answer — and in the lab, a lake you can throw things into yourself.
         </p>
+        {/* The lab is also offered at the end, and beside the demo. This one is
+            for anyone who would rather play first and read afterwards. */}
+        <p className="mt-7">
+          <Link
+            to="/lab"
+            viewTransition
+            className="inline-flex items-center gap-2 rounded-full border border-primary/40 px-5 py-2 font-mono text-xs uppercase tracking-[0.2em] text-primary transition-colors hover:bg-primary/10"
+          >
+            Open the lab →
+          </Link>
+        </p>
       </header>
 
       <div className="mt-10 space-y-5">
