@@ -290,3 +290,291 @@ input[type="range"] { accent-color: var(--primary); width: 100%; }
 @media (prefers-reduced-motion: reduce) {
   .lede > * { animation: none; }
 }
+
+/* ── the scroll film ──────────────────────────────────────────────────────────
+   One tall track with a sticky stage inside it. Scrolling the track does not
+   move the stage; it moves the story. The canvas fills the stage and everything
+   here sits over it, so nothing but the buttons may take the pointer. */
+
+.ripple-film {
+  position: relative;
+  background: oklch(0.1 0.025 235);
+}
+
+.ripple-film__track { position: relative; }
+
+.ripple-film__stage {
+  position: sticky;
+  top: 0;
+  height: 100svh;
+  overflow: hidden;
+}
+
+.ripple-film__canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.ripple-film__overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  padding: 4.5rem max(1.25rem, 3.5vw) 3rem;
+  pointer-events: none;
+}
+
+.ripple-film__overlay a,
+.ripple-film__overlay button { pointer-events: auto; }
+
+/* ── a chapter's card ─────────────────────────────────────────────────────── */
+
+.ripple-film__card {
+  max-width: 27rem;
+  will-change: transform, opacity;
+}
+
+.ripple-film__step {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--primary);
+  margin-bottom: 0.4rem;
+}
+
+.ripple-film__title {
+  font-family: var(--font-display);
+  font-weight: 300;
+  font-size: clamp(1.45rem, 2.6vw, 2.1rem);
+  line-height: 1.12;
+  letter-spacing: -0.015em;
+  color: var(--foreground);
+  margin-bottom: 0.85rem;
+  text-shadow: 0 0.15rem 1.4rem oklch(0.1 0.025 235 / 0.9);
+}
+
+.ripple-film__card p {
+  font-size: 0.92rem;
+  line-height: 1.62;
+  color: oklch(0.86 0.025 212);
+  margin-bottom: 0.7rem;
+  text-shadow: 0 0.1rem 0.9rem oklch(0.1 0.025 235 / 0.95);
+}
+
+.ripple-film__card p em { color: var(--foreground); font-style: italic; }
+.ripple-film__quiet { color: var(--muted-foreground) !important; font-size: 0.84rem !important; }
+
+.ripple-film__eq {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: clamp(1rem, 1.5vw, 1.2rem);
+  color: var(--foreground) !important;
+  text-align: center;
+  padding: 0.6rem 0.8rem;
+  margin-bottom: 0.85rem !important;
+  border-radius: 0.6rem;
+  border: 1px solid oklch(0.82 0.12 195 / 0.22);
+  background: oklch(0.14 0.03 232 / 0.72);
+  backdrop-filter: blur(6px);
+}
+
+.ripple-film__stats { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin: 0.2rem 0 0.75rem; }
+.ripple-film__stats--3 { grid-template-columns: repeat(3, 1fr); }
+
+.ripple-film__stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 0.55rem;
+  border: 1px solid oklch(0.85 0.05 210 / 0.12);
+  background: oklch(0.14 0.03 232 / 0.6);
+}
+
+.ripple-film__stat span {
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+.ripple-film__stat strong {
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: var(--primary);
+}
+
+/* ── the opening and closing cards, which have the screen to themselves ───── */
+
+.ripple-film__hero { margin: auto; max-width: 46rem; text-align: center; will-change: transform, opacity; }
+
+.ripple-film__kicker {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--primary);
+  margin-bottom: 1.1rem;
+}
+
+.ripple-film__display {
+  font-family: var(--font-display);
+  font-weight: 300;
+  font-size: clamp(2.1rem, 6.2vw, 4.6rem);
+  line-height: 1.02;
+  letter-spacing: -0.03em;
+  color: var(--foreground);
+  text-shadow: 0 0 3rem oklch(0.82 0.12 195 / 0.3), 0 0.2rem 2rem oklch(0.08 0.02 235 / 0.9);
+  margin-bottom: 1.2rem;
+}
+
+.ripple-film__display--sm { font-size: clamp(1.8rem, 4.2vw, 3.1rem); }
+
+.ripple-film__lede {
+  max-width: 34rem;
+  margin: 0 auto 1.6rem;
+  font-size: clamp(0.95rem, 1.2vw, 1.08rem);
+  line-height: 1.65;
+  color: oklch(0.82 0.03 212);
+  text-shadow: 0 0.1rem 1rem oklch(0.1 0.025 235 / 0.95);
+}
+
+.ripple-film__actions { display: flex; flex-wrap: wrap; gap: 0.7rem; justify-content: center; }
+
+.ripple-film__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 999px;
+  border: 1px solid oklch(0.82 0.12 195 / 0.45);
+  padding: 0.55rem 1.3rem;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--primary);
+  background: oklch(0.14 0.03 232 / 0.5);
+  transition: background-color 180ms ease, border-color 180ms ease;
+}
+
+.ripple-film__btn:hover { background: oklch(0.82 0.12 195 / 0.14); }
+.ripple-film__btn--ghost { color: var(--muted-foreground); border-color: oklch(0.85 0.05 210 / 0.22); }
+
+.ripple-film__cue {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+.ripple-film__cue i {
+  width: 1px;
+  height: 2.6rem;
+  background: linear-gradient(var(--primary), transparent);
+  transform-origin: top;
+  animation: ripple-cue 1.9s ease-in-out infinite;
+}
+
+@keyframes ripple-cue {
+  0%, 100% { transform: scaleY(0.35); opacity: 0.45; }
+  50%      { transform: scaleY(1);    opacity: 1; }
+}
+
+/* ── where you are, and how to get somewhere else ─────────────────────────── */
+
+.ripple-film__rail {
+  position: absolute;
+  z-index: 3;
+  top: 50%;
+  right: max(0.5rem, 1.2vw);
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.ripple-film__dot {
+  position: relative;
+  width: 0.7rem;
+  height: 0.7rem;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid oklch(0.85 0.05 210 / 0.4);
+  background: transparent;
+  cursor: pointer;
+  transition: transform 220ms ease, background-color 220ms ease, box-shadow 220ms ease;
+}
+
+.ripple-film__dot.is-done { background: oklch(0.82 0.12 195 / 0.45); border-color: transparent; }
+
+.ripple-film__dot.is-on {
+  background: var(--foreground);
+  transform: scale(1.35);
+  box-shadow: 0 0 0.8rem var(--primary);
+}
+
+.ripple-film__dot span {
+  position: absolute;
+  top: 50%;
+  right: 1.35rem;
+  transform: translateY(-50%);
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  color: var(--foreground);
+  text-shadow: 0 1px 0.5rem oklch(0.08 0.02 235);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 180ms ease;
+}
+
+.ripple-film__dot:hover span,
+.ripple-film__dot.is-on span { opacity: 1; }
+.ripple-film__dot:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
+
+.ripple-film__progress {
+  position: absolute;
+  z-index: 3;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: oklch(0.85 0.05 210 / 0.1);
+}
+
+.ripple-film__progress > div {
+  height: 100%;
+  transform-origin: left;
+  background: linear-gradient(90deg, var(--primary), var(--accent));
+  box-shadow: 0 0 0.6rem var(--primary);
+}
+
+/* ── narrow screens ───────────────────────────────────────────────────────────
+   The charts are drawn across the top there, so the words go to the bottom. */
+
+@media (max-width: 899px) {
+  .ripple-film__overlay { align-items: flex-end; padding-bottom: 2.5rem; }
+  .ripple-film__card { max-width: none; }
+  .ripple-film__hero { margin: auto 0 0; text-align: left; }
+  .ripple-film__lede { margin-left: 0; }
+  .ripple-film__actions { justify-content: flex-start; }
+  .ripple-film__rail { gap: 0.4rem; right: 0.4rem; }
+  .ripple-film__dot { width: 0.45rem; height: 0.45rem; }
+  .ripple-film__dot span { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ripple-film__cue i { animation: none; }
+}
