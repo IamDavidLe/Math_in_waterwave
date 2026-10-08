@@ -310,13 +310,30 @@ input[type="range"] { accent-color: var(--primary); width: 100%; }
   overflow: hidden;
 }
 
-.ripple-film__canvas {
+.ripple-film__stage {
+  /* Written every frame by the film's own loop; everything below reads them, so
+     the smooth part of the animation never goes through a React render. */
+  --in: 1;
+  --out: 0;
+  --hero-in: 1;
+  --hero-out: 0;
+  --progress: 0;
+}
+
+/* The surface is drawn small and stretched here by the compositor, which is
+   free and softens it the way water is soft anyway. Only the marks are drawn at
+   device resolution, and they are hairlines on transparency. */
+.ripple-film__water,
+.ripple-film__marks {
   position: absolute;
   inset: 0;
   display: block;
   width: 100%;
   height: 100%;
 }
+
+.ripple-film__water { z-index: 0; }
+.ripple-film__marks { z-index: 1; }
 
 .ripple-film__overlay {
   position: absolute;
@@ -336,6 +353,8 @@ input[type="range"] { accent-color: var(--primary); width: 100%; }
 .ripple-film__card {
   max-width: 27rem;
   will-change: transform, opacity;
+  opacity: calc(var(--in) * (1 - var(--out)));
+  transform: translateY(calc((1 - var(--in)) * 26px - var(--out) * 26px));
 }
 
 .ripple-film__step {
@@ -413,7 +432,14 @@ input[type="range"] { accent-color: var(--primary); width: 100%; }
 
 /* ── the opening and closing cards, which have the screen to themselves ───── */
 
-.ripple-film__hero { margin: auto; max-width: 46rem; text-align: center; will-change: transform, opacity; }
+.ripple-film__hero {
+  margin: auto;
+  max-width: 46rem;
+  text-align: center;
+  will-change: transform, opacity;
+  opacity: calc(var(--hero-in) * (1 - var(--hero-out)));
+  transform: translateY(calc(var(--hero-out) * -30px));
+}
 
 .ripple-film__kicker {
   font-family: var(--font-mono);
@@ -557,6 +583,7 @@ input[type="range"] { accent-color: var(--primary); width: 100%; }
 .ripple-film__progress > div {
   height: 100%;
   transform-origin: left;
+  transform: scaleX(var(--progress));
   background: linear-gradient(90deg, var(--primary), var(--accent));
   box-shadow: 0 0 0.6rem var(--primary);
 }

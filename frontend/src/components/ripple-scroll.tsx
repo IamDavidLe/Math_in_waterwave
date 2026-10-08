@@ -41,7 +41,7 @@ import { drawOverlay, phaseSpeed, type View } from "@/lib/ripple-overlay";
    straight out of the loop — a redraw a frame is not something to route through
    a render. */
 
-const flow = { target: 0, current: 0, clock: 0, phase: 0 };
+const flow = { target: 0, current: 0, clock: 0, phase: 0, snap: false };
 const listeners = new Set<() => void>();
 const emit = () => listeners.forEach((l) => l());
 const subscribe = (l: () => void) => {
@@ -49,21 +49,34 @@ const subscribe = (l: () => void) => {
   return () => listeners.delete(l);
 };
 
+/**
+ * What React is actually told.
+ *
+ * The cards' arrival and departure, the progress bar and the readouts all move
+ * continuously with the scroll, but re-rendering them sixty times a second is
+ * sixty style recalculations a second over the whole overlay. So the smooth
+ * part is handed to CSS custom properties, which the frame loop writes
+ * directly, and React is only woken when the chapter changes or a printed
+ * number would actually read differently.
+ */
+function cardKey(f: number): string {
+  return `${split(f).index}:${Math.round(track(f, RADIUS) * 1000)}`;
+}
+
+function useCardKey(): string {
+  return useSyncExternalStore(
+    subscribe,
+    () => cardKey(flow.current),
+    () => cardKey(0),
+  );
+}
+
 /** The chapter id, for anything that only cares which chapter we are in. */
 function useStage(): string {
   return useSyncExternalStore(
     subscribe,
     () => split(flow.current).id,
     () => CHAPTERS[0]!.id,
-  );
-}
-
-/** The full value, for anything that animates continuously with the scroll. */
-function useFlow(): number {
-  return useSyncExternalStore(
-    subscribe,
-    () => flow.current,
-    () => 0,
   );
 }
 
@@ -80,26 +93,39 @@ function readoutAt(f: number) {
    told the flow has moved so the cards can follow, but nothing about a frame
    goes through a render. */
 
+/**
+ * How wide the water buffer may be. The surface is drawn at this width and then
+ * stretched to the stage by the compositor, which is free and gives the bilinear
+ * softening that reads as water anyway. Starting in the middle lets the governor
+ * below find the right size within a second either way.
+ */
+const BUF_MIN = 240;
+const BUF_MAX = 460;
+const BUF_START = 360;
+/** Over this, and the surface is costing more than a frame can afford. */
+const BUDGET_MS = 9;
+const EASY_MS = 5;
+
 function Stage({ trackRef }: { trackRef: React.RefObject<HTMLDivElement | null> }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const waterRef = useRef<HTMLCanvasElement>(null);
+  const marksRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    const host = canvas?.parentElement;
-    if (!canvas || !host) return;
+    const water = waterRef.current;
+    const marks = marksRef.current;
+    const host = water?.parentElement;
+    if (!water || !marks || !host) return;
 
-    const ctx = canvas.getContext("2d", { alpha: false });
-    if (!ctx) return;
+    // The water canvas is sized to its buffer and stretched by CSS, so the
+    // frame ends at `putImageData` — there is no second, full-resolution blit.
+    // Only the marks are drawn at device resolution, and they are thin strokes
+    // on transparency.
+    const wctx = water.getContext("2d", { alpha: false });
+    const mctx = marks.getContext("2d");
+    if (!wctx || !mctx) return;
 
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    // A smaller water buffer on a thin machine. The upscale reads as water
-    // either way, so this costs the look very little.
-    const lean = (navigator.hardwareConcurrency ?? 8) <= 4 || window.innerWidth < 720;
-    const bufW = lean ? 288 : 400;
-
-    const off = document.createElement("canvas");
-    const offCtx = off.getContext("2d", { alpha: false });
-    if (!offCtx) return;
+    const lean = (navigator.hardwareConcurrency ?? 8) <= 4;
 
     const pa = makeProfile();
     const pb = makeProfile();
@@ -107,56 +133,97 @@ function Stage({ trackRef }: { trackRef: React.RefObject<HTMLDivElement | null> 
     let cw = 0;
     let ch = 0;
     let dpr = 1;
+    let bufW = lean ? BUF_MIN : BUF_START;
     let yScale = 0.004;
     let relief = 20;
+    // Where the track starts, cached: reading it inside the loop would force a
+    // layout every frame, on a page the browser is already busy scrolling.
+    let trackTop = 0;
+    let onScreen = true;
+    let cost = 6;
+    let settle = 0;
+    let lastKey = "";
+
+    const sizeWater = () => {
+      const bh = Math.max(1, Math.round((bufW * ch) / cw));
+      water.width = bufW;
+      water.height = bh;
+      img = wctx.createImageData(bufW, bh);
+    };
 
     const measure = () => {
       const r = host.getBoundingClientRect();
       cw = Math.max(1, Math.round(r.width));
       ch = Math.max(1, Math.round(r.height));
-      dpr = Math.min(2, window.devicePixelRatio || 1);
-      canvas.width = Math.round(cw * dpr);
-      canvas.height = Math.round(ch * dpr);
-      canvas.style.width = `${cw}px`;
-      canvas.style.height = `${ch}px`;
-      const bh = Math.max(1, Math.round((bufW * ch) / cw));
-      off.width = bufW;
-      off.height = bh;
-      img = offCtx.createImageData(bufW, bh);
+      // Marks are hairlines and type, so they want device pixels — but a 3×
+      // phone does not need all of them to look sharp.
+      dpr = Math.min(1.75, window.devicePixelRatio || 1);
+      marks.width = Math.round(cw * dpr);
+      marks.height = Math.round(ch * dpr);
+      const el = trackRef.current;
+      trackTop = el ? el.getBoundingClientRect().top + window.scrollY : 0;
+      sizeWater();
     };
     measure();
 
     const ro = new ResizeObserver(measure);
     ro.observe(host);
+    // A sticky stage leaves the viewport once the track is behind you. Without
+    // this the film goes on drawing at sixty frames a second underneath the
+    // whole written investigation.
+    const io = new IntersectionObserver(([e]) => {
+      const now = e?.isIntersecting ?? true;
+      // Coming back to the film, take up the scroll's position rather than
+      // sweeping to it from wherever we left off.
+      if (now && !onScreen) flow.snap = true;
+      onScreen = now;
+    });
+    io.observe(host);
+    const onResize = () => measure();
+    window.addEventListener("resize", onResize, { passive: true });
 
     let raf = 0;
     let prev = performance.now();
+    let drawn = -1;
 
     const frame = (now: number) => {
+      raf = requestAnimationFrame(frame);
       const dt = Math.min(0.05, Math.max(0, (now - prev) / 1000));
       prev = now;
+      if (!onScreen) return;
       if (!reduced) flow.clock += dt;
 
-      // Where the scroll has got to, in chapter space.
-      const el = trackRef.current;
-      if (el) {
-        const seen = -el.getBoundingClientRect().top / window.innerHeight;
-        flow.target = toChapterSpace(Math.max(0, seen));
-      }
+      flow.target = toChapterSpace(Math.max(0, (window.scrollY - trackTop) / window.innerHeight));
+
+      // Chase the scroll. The decay is written against elapsed time rather than
+      // per frame, so a dropped frame is caught up with instead of being left
+      // behind — which is what makes a long scroll feel even.
       const before = flow.current;
       const gap = flow.target - flow.current;
       flow.current =
-        reduced || Math.abs(gap) < 1e-4 ? flow.target : flow.current + gap * Math.min(1, dt * 5.5);
+        reduced || flow.snap || Math.abs(gap) < 1e-4
+          ? flow.target
+          : flow.current + gap * (1 - Math.exp(-7 * dt));
+      flow.snap = false;
 
       // The pond's own cycle of drops — except in the drop chapter, where the
       // scroll is holding the stone.
       const scrub = scrubPhase(flow.current);
       if (scrub !== null) flow.phase = scrub;
-      else if (!reduced) {
+      else if (reduced) {
+        // No animation, but no empty pond either: hold every chapter at a point
+        // in the cycle where a ring train is in flight.
+        flow.phase = 0.55;
+      } else {
         flow.phase += dt / periodAt(flow.current);
         if (flow.phase > 1) flow.phase -= 1;
       }
 
+      // Nothing moving and nothing scrolled: there is no new frame to draw.
+      if (reduced && flow.current === drawn) return;
+      drawn = flow.current;
+
+      const t0 = performance.now();
       const scene = sceneAt(flow.current, flow.clock, flow.phase);
 
       // Tables have to reach the furthest corner of the view from each source,
@@ -179,27 +246,24 @@ function Stage({ trackRef }: { trackRef: React.RefObject<HTMLDivElement | null> 
       // that changes the size of the object brightens over a beat rather than
       // stepping.
       const want = exposureFor(pa.peakSlope + (second ? second.peakSlope : 0), scene.swell);
-      relief += (want.relief - relief) * Math.min(1, dt * 1.6);
+      relief += (want.relief - relief) * (1 - Math.exp(-2 * dt));
       const ex: Exposure = { relief, swell: want.swell };
 
       if (img) {
         drawWater(img, scene, pa, second, ex);
-        offCtx.putImageData(img, 0, 0);
+        wctx.putImageData(img, 0, 0);
       }
-
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = "high";
-      ctx.drawImage(off, 0, 0, cw, ch);
 
       // The graph's vertical scale follows the ripple, but slowly, so the curve
       // fills the panel without the axis twitching every frame.
       const tall = Math.max(pa.peak * 1.25, 0.0002);
-      yScale += (tall - yScale) * Math.min(1, dt * 2.2);
+      yScale += (tall - yScale) * (1 - Math.exp(-2.6 * dt));
 
+      mctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      mctx.clearRect(0, 0, cw, ch);
       const s = cw / scene.spanM;
       const view: View = {
-        ctx,
+        ctx: mctx,
         w: cw,
         h: ch,
         s,
@@ -209,18 +273,55 @@ function Stage({ trackRef }: { trackRef: React.RefObject<HTMLDivElement | null> 
       };
       drawOverlay(view, scene, pa, yScale, flow.clock);
 
-      if (flow.current !== before) emit();
-      raf = requestAnimationFrame(frame);
+      // Keep the surface inside its budget on whatever machine this is. A
+      // rolling average decides, and a cooldown keeps it from hunting.
+      cost += (performance.now() - t0 - cost) * 0.1;
+      if (settle > 0) settle--;
+      else if (cost > BUDGET_MS && bufW > BUF_MIN) {
+        bufW = Math.max(BUF_MIN, Math.round(bufW * 0.85));
+        sizeWater();
+        settle = 45;
+      } else if (cost < EASY_MS && bufW < BUF_MAX && !lean) {
+        bufW = Math.min(BUF_MAX, Math.round(bufW * 1.12));
+        sizeWater();
+        settle = 45;
+      }
+
+      // The smooth part, straight onto the element the cards inherit from.
+      if (flow.current !== before) {
+        const { index, p } = split(flow.current);
+        const hero = index === 0 || index === CHAPTERS.length - 1;
+        host.style.setProperty("--in", String(out3(win(p, 0, 0.09))));
+        host.style.setProperty("--out", String(win(p, 0.9, 1)));
+        host.style.setProperty(
+          "--hero-in",
+          hero && index > 0 ? String(out3(win(p, 0.05, 0.4))) : "1",
+        );
+        host.style.setProperty("--hero-out", hero && index === 0 ? String(win(p, 0.55, 1)) : "0");
+        host.style.setProperty("--progress", String(flow.current / CHAPTERS.length));
+        const key = cardKey(flow.current);
+        if (key !== lastKey) {
+          lastKey = key;
+          emit();
+        }
+      }
     };
     raf = requestAnimationFrame(frame);
 
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
+      io.disconnect();
+      window.removeEventListener("resize", onResize);
     };
   }, [trackRef]);
 
-  return <canvas ref={canvasRef} className="ripple-film__canvas" aria-hidden="true" />;
+  return (
+    <>
+      <canvas ref={waterRef} className="ripple-film__water" aria-hidden="true" />
+      <canvas ref={marksRef} className="ripple-film__marks" aria-hidden="true" />
+    </>
+  );
 }
 
 /* ── the words ────────────────────────────────────────────────────────────────
@@ -228,27 +329,11 @@ function Stage({ trackRef }: { trackRef: React.RefObject<HTMLDivElement | null> 
    leaves over the last, so there is a moment in the middle where the water has
    the screen to itself. */
 
-function Card({
-  p,
-  step,
-  title,
-  children,
-}: {
-  p: number;
-  step: string;
-  title: string;
-  children?: ReactNode;
-}) {
-  const inAt = out3(win(p, 0, 0.09));
-  const outAt = win(p, 0.9, 1);
+function Card({ step, title, children }: { step: string; title: string; children?: ReactNode }) {
+  // Arrival and departure are CSS, driven by variables the frame loop writes —
+  // see `cardKey`.
   return (
-    <div
-      className="ripple-film__card"
-      style={{
-        opacity: inAt * (1 - outAt),
-        transform: `translateY(${(1 - inAt) * 26 - outAt * 26}px)`,
-      }}
-    >
+    <div className="ripple-film__card">
       <p className="ripple-film__step">{step}</p>
       <h2 className="ripple-film__title">{title}</h2>
       {children}
@@ -268,21 +353,16 @@ function Stat({ k, value }: { k: string; value: string }) {
 }
 
 function Words({ onJump }: { onJump: (i: number) => void }) {
-  const f = useFlow();
-  const { index, p } = split(f);
-  const r = readoutAt(f);
+  // Re-rendered only when the chapter or a printed number changes; everything
+  // that moves every frame is CSS.
+  const index = Number(useCardKey().split(":")[0]);
+  const r = readoutAt(flow.current);
 
   return (
     <>
       <div className="ripple-film__overlay">
         {index === 0 && (
-          <div
-            className="ripple-film__hero"
-            style={{
-              opacity: 1 - win(p, 0.55, 1),
-              transform: `translateY(${-win(p, 0.4, 1) * 30}px)`,
-            }}
-          >
+          <div className="ripple-film__hero">
             <p className="ripple-film__kicker">A ripple investigation</p>
             <h1 className="ripple-film__display">
               Every splash writes a<br />
@@ -301,7 +381,7 @@ function Words({ onJump }: { onJump: (i: number) => void }) {
         )}
 
         {index === 1 && (
-          <Card p={p} step="01 · The drop" title="Something touches the surface">
+          <Card step="01 · The drop" title="Something touches the surface">
             <p>
               One object, one moment. From here on every number on this page is computed from
               <em> this</em> impact — the size of the thing that fell, and the water it fell into.
@@ -314,7 +394,7 @@ function Words({ onJump }: { onJump: (i: number) => void }) {
         )}
 
         {index === 2 && (
-          <Card p={p} step="02 · The symmetry" title="Direction does not matter. Only distance.">
+          <Card step="02 · The symmetry" title="Direction does not matter. Only distance.">
             <Eq>η(r, θ, t) = η(r, t)</Eq>
             <p>
               Put the origin at the impact. The height of the water does not depend on θ at all — so
@@ -329,7 +409,7 @@ function Words({ onJump }: { onJump: (i: number) => void }) {
         )}
 
         {index === 3 && (
-          <Card p={p} step="03 · The curve" title="Cut through the rings and you get a cosine">
+          <Card step="03 · The curve" title="Cut through the rings and you get a cosine">
             <Eq>η = A cos(kr − ωt)</Eq>
             <p>
               The curve in the panel is not a drawing of the water — it is the water, the same
@@ -343,7 +423,7 @@ function Words({ onJump }: { onJump: (i: number) => void }) {
         )}
 
         {index === 4 && (
-          <Card p={p} step="04 · Why it moves" title="Travelling outward is a translation">
+          <Card step="04 · Why it moves" title="Travelling outward is a translation">
             <Eq>kr − ωt = k(r − ct), &nbsp;c = ω/k</Eq>
             <p>
               Replacing r with r − ct is a horizontal shift of the graph, nothing more. The curve
@@ -357,7 +437,7 @@ function Words({ onJump }: { onJump: (i: number) => void }) {
         )}
 
         {index === 5 && (
-          <Card p={p} step="05 · Why it flattens" title="Geometry, not friction">
+          <Card step="05 · Why it flattens" title="Geometry, not friction">
             <Eq>A² × 2πr = constant &nbsp;⟹&nbsp; A ∝ 1/√r</Eq>
             <p>
               The same energy, shared around an ever longer circle. A wave's energy goes as the
@@ -372,7 +452,7 @@ function Words({ onJump }: { onJump: (i: number) => void }) {
         )}
 
         {index === 6 && (
-          <Card p={p} step="06 · The surprise" title="In water, speed depends on wavelength">
+          <Card step="06 · The surprise" title="In water, speed depends on wavelength">
             <Eq>ω² = gk + σk³/ρ</Eq>
             <p>
               Two forces pull the surface flat, and they work on different scales: gravity on the
@@ -387,7 +467,7 @@ function Words({ onJump }: { onJump: (i: number) => void }) {
         )}
 
         {index === 7 && (
-          <Card p={p} step="07 · The answer" title="The object sets λ, and λ sets everything else">
+          <Card step="07 · The answer" title="The object sets λ, and λ sets everything else">
             <Eq>λ ≈ 2R</Eq>
             <p>
               This is what I had been seeing as a child. The object decides how wide a hole it
@@ -407,7 +487,7 @@ function Words({ onJump }: { onJump: (i: number) => void }) {
         )}
 
         {index === 8 && (
-          <Card p={p} step="08 · Two stones" title="Where they meet, they simply add">
+          <Card step="08 · Two stones" title="Where they meet, they simply add">
             <p>
               Throw two and the surface does something lovelier. At every point the two heights add:
               crest on crest lifts the water twice as high, crest on trough leaves it flat.
@@ -419,7 +499,7 @@ function Words({ onJump }: { onJump: (i: number) => void }) {
         )}
 
         {index === 9 && (
-          <Card p={p} step="09 · The conic" title="The still lanes are hyperbolas">
+          <Card step="09 · The conic" title="The still lanes are hyperbolas">
             <Eq>d₁ − d₂ = (n + ½)λ</Eq>
             <p>
               The water cancels wherever the two journeys differ by half a wavelength. “All the
@@ -434,7 +514,7 @@ function Words({ onJump }: { onJump: (i: number) => void }) {
         )}
 
         {index === 10 && (
-          <div className="ripple-film__hero" style={{ opacity: out3(win(p, 0.05, 0.4)) }}>
+          <div className="ripple-film__hero">
             <p className="ripple-film__kicker">Your turn</p>
             <h2 className="ripple-film__display ripple-film__display--sm">
               Now throw something in yourself.
@@ -471,7 +551,7 @@ function Words({ onJump }: { onJump: (i: number) => void }) {
       </nav>
 
       <div className="ripple-film__progress" aria-hidden="true">
-        <div style={{ transform: `scaleX(${f / CHAPTERS.length})` }} />
+        <div />
       </div>
     </>
   );

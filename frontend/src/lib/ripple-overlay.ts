@@ -45,6 +45,50 @@ export type View = {
 
 const mono = (u: number, px: number) => MONO.replace("N", String(Math.round(px * u)));
 
+/**
+ * Curves are handed around as flat [x, y, x, y, …] lists. Building a fresh one
+ * for each of them every frame is a few hundred short-lived arrays a second,
+ * and the collection pauses that causes are visible as a hitch in a scroll
+ * animation — so they come from here instead and are reused.
+ */
+const scratch: number[][] = [];
+let taken = 0;
+function poly(): number[] {
+  const a = scratch[taken] ?? (scratch[taken] = []);
+  taken++;
+  a.length = 0;
+  return a;
+}
+
+/**
+ * A glow, without `shadowBlur`.
+ *
+ * Canvas shadows are re-rasterised per draw and are far and away the most
+ * expensive thing a 2D context can be asked for; on a long polyline redrawn
+ * sixty times a second they cost more than the whole water surface. Two passes
+ * of the same path — a wide faint one under a narrow bright one — read the same
+ * at a fraction of the price.
+ */
+function glow(
+  ctx: CanvasRenderingContext2D,
+  pts: number[],
+  t: number,
+  colour: string,
+  wide: number,
+  thin: number,
+  halo: string,
+) {
+  const a = ctx.globalAlpha;
+  ctx.globalAlpha = a * 0.3;
+  ctx.strokeStyle = halo;
+  ctx.lineWidth = wide;
+  drawIn(ctx, pts, t);
+  ctx.globalAlpha = a;
+  ctx.strokeStyle = colour;
+  ctx.lineWidth = thin;
+  drawIn(ctx, pts, t);
+}
+
 /** Draws the first `t` of a polyline, so a curve arrives along its own length. */
 function drawIn(ctx: CanvasRenderingContext2D, pts: number[], t: number) {
   const n = pts.length / 2;
@@ -316,7 +360,7 @@ function drawCut(v: View, scene: Scene, pa: Profile, yScale: number, clock: numb
   label(v, "r", gx(rShow) - 2 * v.u, gy(0) + 13 * v.u, C_INK, 10, "center");
 
   // The curve, read straight out of the table the water was shaded from.
-  const pts: number[] = [];
+  const pts = poly();
   const step = Math.max(1, Math.floor(rShow / pa.dr / 260));
   for (let i = 0; i * pa.dr <= rShow && i < PROFILE_SAMPLES; i += step) {
     pts.push(gx(i * pa.dr), gy(pa.eta[i]!));
@@ -329,7 +373,7 @@ function drawCut(v: View, scene: Scene, pa: Profile, yScale: number, clock: numb
     ctx.lineWidth = 1.2;
     ctx.setLineDash([5, 4]);
     for (const sign of [1, -1]) {
-      const e: number[] = [];
+      const e = poly();
       for (let i = 0; i * pa.dr <= rShow && i < PROFILE_SAMPLES; i += step) {
         e.push(gx(i * pa.dr), gy(sign * pa.env[i]!));
       }
@@ -349,7 +393,7 @@ function drawCut(v: View, scene: Scene, pa: Profile, yScale: number, clock: numb
     ctx.strokeStyle = C_INK;
     ctx.lineWidth = 1.4;
     ctx.setLineDash([4, 4]);
-    const ghost: number[] = [];
+    const ghost = poly();
     for (let i = 0; i * pa.dr <= rShow && i < PROFILE_SAMPLES; i += step) {
       const r = i * pa.dr - shift;
       if (r < 0) continue;
@@ -386,13 +430,8 @@ function drawCut(v: View, scene: Scene, pa: Profile, yScale: number, clock: numb
     ctx.globalAlpha = o.graph;
   }
 
-  ctx.strokeStyle = C_WAVE;
-  ctx.lineWidth = 2;
   ctx.lineJoin = "round";
-  ctx.shadowColor = "rgba(77, 220, 220, 0.45)";
-  ctx.shadowBlur = 8;
-  drawIn(ctx, pts, o.graph);
-  ctx.shadowBlur = 0;
+  glow(ctx, pts, o.graph, C_WAVE, 5.5, 2, "rgba(77, 220, 220, 0.5)");
 
   // Crest to crest is one wavelength — measured off the curve, not asserted.
   if (o.lambdaMark > 0.01) {
@@ -443,17 +482,12 @@ function drawDispersion(v: View, scene: Scene) {
   ctx.lineTo(px(LO), R.y + pad * 0.6);
   ctx.stroke();
 
-  const pts: number[] = [];
+  const pts = poly();
   for (let i = 0; i <= 160; i++) {
     const lam = LO * Math.exp((i / 160) * span);
     pts.push(px(lam), py(phaseSpeed(lam)));
   }
-  ctx.strokeStyle = C_WAVE;
-  ctx.lineWidth = 2;
-  ctx.shadowColor = "rgba(77, 220, 220, 0.4)";
-  ctx.shadowBlur = 7;
-  drawIn(ctx, pts, o.dispersion);
-  ctx.shadowBlur = 0;
+  glow(ctx, pts, o.dispersion, C_WAVE, 5, 2, "rgba(77, 220, 220, 0.45)");
 
   // The slowest wave water can carry — the bottom of the curve.
   const lmin = minimumWavelength();
@@ -578,26 +612,23 @@ function drawInterference(v: View, scene: Scene) {
   // the curves themselves, named.
   if (o.hyperbola > 0.01) {
     ctx.globalAlpha = o.hyperbola;
-    ctx.strokeStyle = C_NODE;
-    ctx.lineWidth = 1.7;
-    ctx.shadowColor = "rgba(238, 177, 84, 0.5)";
-    ctx.shadowBlur = 6;
     const limit = scene.spanM * 0.62;
     for (let n = 0; n < 7; n++) {
       const A = ((n + 0.5) * lam) / 2;
       if (A >= a) break;
       const B = Math.sqrt(a * a - A * A);
       for (const sign of [1, -1]) {
-        const pts: number[] = [];
+        const pts = poly();
         for (let t = -3.2; t <= 3.2; t += 0.04) {
           const wy = B * Math.sinh(t);
           if (Math.abs(wy) > limit) continue;
           pts.push(v.X(sign * A * Math.cosh(t)), v.Y(wy));
         }
-        if (pts.length > 4) drawIn(ctx, pts, o.hyperbola);
+        if (pts.length > 4) {
+          glow(ctx, pts, o.hyperbola, C_NODE, 4.5, 1.7, "rgba(238, 177, 84, 0.45)");
+        }
       }
     }
-    ctx.shadowBlur = 0;
   }
 
   // The foci, and the two distances the condition is written in.
@@ -675,6 +706,7 @@ function drawInterference(v: View, scene: Scene) {
 
 /** Everything over the water, in the order it should stack. */
 export function drawOverlay(v: View, scene: Scene, pa: Profile, yScale: number, clock: number) {
+  taken = 0;
   drawPolar(v, scene, clock);
   drawSizeDial(v, scene);
   drawInterference(v, scene);
